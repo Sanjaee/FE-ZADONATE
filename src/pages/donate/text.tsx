@@ -11,10 +11,25 @@ interface TextMessage {
 
 // TTS function - Browser built-in with high quality, clear, and slow
 function speak(text: string) {
-  if (!("speechSynthesis" in window)) return;
+  if (!("speechSynthesis" in window)) {
+    console.warn("Speech synthesis not supported");
+    return;
+  }
 
   const speakWithVoice = () => {
     const voices = window.speechSynthesis.getVoices();
+    
+    if (voices.length === 0) {
+      console.warn("No voices available, retrying...");
+      // Retry after a short delay
+      setTimeout(() => {
+        const retryVoices = window.speechSynthesis.getVoices();
+        if (retryVoices.length > 0) {
+          speakWithVoice();
+        }
+      }, 500);
+      return;
+    }
 
     // Prioritaskan voice Indonesia yang bagus dan jernih
     // Cari Google Indonesia terlebih dahulu (paling jernih)
@@ -29,8 +44,10 @@ function speak(text: string) {
     const voice = googleIdVoice || idVoice || voices.find(v => v.lang.startsWith("id")) || voices[0];
 
     if (!voice) {
-      console.warn("No suitable voice found");
-      return;
+      console.warn("No suitable voice found, using default");
+      // Use default voice if no Indonesian voice found
+      const defaultVoice = voices[0];
+      if (!defaultVoice) return;
     }
 
     // Bersihkan text untuk TTS
@@ -65,6 +82,11 @@ function speak(text: string) {
       }, [])
       .filter(s => s.trim().length > 0);
 
+    if (sentences.length === 0) {
+      console.warn("No sentences to speak");
+      return;
+    }
+
     // Hentikan suara sebelumnya
     window.speechSynthesis.cancel();
 
@@ -72,29 +94,54 @@ function speak(text: string) {
     sentences.forEach((sentence, index) => {
       const utterance = new SpeechSynthesisUtterance(sentence);
 
-      utterance.voice = voice;
-      utterance.lang = "id-ID";
+      utterance.voice = voice || null;
+      utterance.lang = voice?.lang || "id-ID";
       
       // Pengaturan untuk suara jernih dan slow
       utterance.rate = 0.75;      // Slow (0.1 - 10, default 1)
       utterance.pitch = 1.0;      // Normal pitch (0 - 2, default 1)
       utterance.volume = 1.0;     // Full volume (0 - 1, default 1)
 
+      // Error handling
+      utterance.onerror = (event) => {
+        console.error("TTS error:", event.error);
+      };
+
+      utterance.onstart = () => {
+        console.log("TTS started:", sentence);
+      };
+
+      utterance.onend = () => {
+        console.log("TTS ended:", sentence);
+      };
+
       // Jeda antar kalimat
       if (index > 0) {
-        utterance.onstart = () => {
-          // Small delay before starting next sentence
-        };
+        // Add small delay between sentences
+        setTimeout(() => {
+          window.speechSynthesis.speak(utterance);
+        }, index * 300);
+      } else {
+        window.speechSynthesis.speak(utterance);
       }
-
-      window.speechSynthesis.speak(utterance);
     });
   };
 
   // Tunggu voices loaded jika belum ready
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) {
-    window.speechSynthesis.onvoiceschanged = speakWithVoice;
+    // Wait for voices to load
+    const checkVoices = () => {
+      const loadedVoices = window.speechSynthesis.getVoices();
+      if (loadedVoices.length > 0) {
+        speakWithVoice();
+      } else {
+        setTimeout(checkVoices, 100);
+      }
+    };
+    window.speechSynthesis.onvoiceschanged = checkVoices;
+    // Also try after a delay
+    setTimeout(checkVoices, 500);
   } else {
     speakWithVoice();
   }
@@ -173,9 +220,15 @@ export default function TextPage() {
                     message: message,
                   });
 
-                  // TTS: Speak the donation message
-                  const ttsText = `${data.donorName} baru saja memberikan Rp${data.amount.toLocaleString("id-ID")}${data.message ? `. ${data.message}` : ""}`;
-                  speak(ttsText);
+                  // TTS: Speak the donation message (with small delay to ensure state is set)
+                  const amount = data.amount;
+                  if (amount !== undefined) {
+                    setTimeout(() => {
+                      const ttsText = `${data.donorName} baru saja memberikan Rp${amount.toLocaleString("id-ID")}${message ? `. ${message}` : ""}`;
+                      console.log("Attempting to speak:", ttsText);
+                      speak(ttsText);
+                    }, 100);
+                  }
                 }
               } catch {
                 // Skip invalid JSON messages

@@ -10,6 +10,8 @@ interface DonationMessage {
   message?: string;
   mediaUrl?: string;
   mediaType?: string;
+  startTime?: number; // Start time in seconds for YouTube videos (legacy)
+  targetTime?: string | number; // Start time in seconds for YouTube videos (can be string or number)
   visible?: boolean;
 }
 
@@ -103,6 +105,7 @@ function calculateDisplayDuration(amount: number): number {
 export default function GiftPage() {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video" | "youtube" | "instagram" | "tiktok" | null>(null);
+  const [startTime, setStartTime] = useState<number>(0); // Start time in seconds for YouTube videos
   const [donationMessage, setDonationMessage] = useState<{
     donorName: string;
     amount: number; // Integer amount
@@ -169,6 +172,23 @@ export default function GiftPage() {
               case "media":
                 if (data.mediaUrl) {
                   setMediaUrl(data.mediaUrl);
+                  // Set start time for YouTube videos - prioritize targetTime over startTime
+                  let parsedStartTime = 0;
+                  if (data.targetTime !== undefined) {
+                    // targetTime can be string or number
+                    if (typeof data.targetTime === "string") {
+                      const parsed = parseInt(data.targetTime, 10);
+                      if (!isNaN(parsed) && parsed >= 0) {
+                        parsedStartTime = parsed;
+                      }
+                    } else if (typeof data.targetTime === "number" && data.targetTime >= 0) {
+                      parsedStartTime = data.targetTime;
+                    }
+                  } else if (data.startTime !== undefined && data.startTime >= 0) {
+                    // Fallback to legacy startTime
+                    parsedStartTime = data.startTime;
+                  }
+                  setStartTime(parsedStartTime);
                   // Auto-detect platform or use provided mediaType
                   if (isYouTubeUrl(data.mediaUrl)) {
                     setMediaType("youtube");
@@ -263,6 +283,7 @@ export default function GiftPage() {
           // Close when time is up
           setMediaUrl(null);
           setMediaType(null);
+          setStartTime(0);
           setDonationMessage(null);
           setRemainingTime(0);
           setTotalDuration(0);
@@ -275,6 +296,7 @@ export default function GiftPage() {
     const timer = setTimeout(() => {
       setMediaUrl(null);
       setMediaType(null);
+      setStartTime(0);
       setDonationMessage(null);
       setRemainingTime(0);
       setTotalDuration(0);
@@ -301,6 +323,7 @@ export default function GiftPage() {
       const timer = setTimeout(() => {
         setMediaUrl(null);
         setMediaType(null);
+        setStartTime(0);
         setVideoDuration(0);
       }, finalDuration);
 
@@ -434,7 +457,8 @@ export default function GiftPage() {
           )}
           {mediaType === "youtube" && extractYouTubeId(mediaUrl) && (
             <iframe
-              src={`https://www.youtube.com/embed/${extractYouTubeId(mediaUrl)}?autoplay=1&loop=1&playlist=${extractYouTubeId(mediaUrl)}&controls=0&mute=0&rel=0&modestbranding=1&playsinline=1`}
+              key={`${mediaUrl}-${startTime}`}
+              src={`https://www.youtube.com/embed/${extractYouTubeId(mediaUrl)}?autoplay=1&mute=0&controls=0&rel=0&modestbranding=1&playsinline=1&start=${startTime}&enablejsapi=1`}
               className="w-full h-full"
               allow="autoplay; encrypted-media; picture-in-picture"
               allowFullScreen
