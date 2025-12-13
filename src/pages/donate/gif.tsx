@@ -30,9 +30,59 @@ function extractYouTubeId(url: string): string | null {
   return null;
 }
 
+// Helper function to extract Instagram Reel ID and type
+function extractInstagramId(url: string): { id: string; type: "reel" | "post" } | null {
+  const reelPattern = /instagram\.com\/reel\/([^\/\?]+)/;
+  const postPattern = /instagram\.com\/p\/([^\/\?]+)/;
+  
+  const reelMatch = url.match(reelPattern);
+  if (reelMatch && reelMatch[1]) {
+    return { id: reelMatch[1], type: "reel" };
+  }
+  
+  const postMatch = url.match(postPattern);
+  if (postMatch && postMatch[1]) {
+    return { id: postMatch[1], type: "post" };
+  }
+
+  return null;
+}
+
+// Helper function to extract TikTok video ID from URL
+function extractTikTokId(url: string): string | null {
+  // TikTok URL formats:
+  // https://www.tiktok.com/@username/video/VIDEO_ID?query=params
+  // https://vm.tiktok.com/CODE
+  // https://tiktok.com/@username/video/VIDEO_ID
+  const patterns = [
+    /tiktok\.com\/@[^\/\?]+\/video\/(\d+)/,  // Match @username/video/ID with optional query params
+    /tiktok\.com\/.*\/video\/(\d+)/,         // Match any path with /video/ID
+    /vm\.tiktok\.com\/([^\/\?]+)/,           // Match vm.tiktok.com short links
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
 // Helper function to check if URL is YouTube
 function isYouTubeUrl(url: string): boolean {
   return /youtube\.com|youtu\.be/.test(url);
+}
+
+// Helper function to check if URL is Instagram
+function isInstagramUrl(url: string): boolean {
+  return /instagram\.com/.test(url);
+}
+
+// Helper function to check if URL is TikTok
+function isTikTokUrl(url: string): boolean {
+  return /tiktok\.com/.test(url);
 }
 
 // Helper function to calculate display duration based on donation amount
@@ -52,7 +102,7 @@ function calculateDisplayDuration(amount: number): number {
 
 export default function GiftPage() {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  const [mediaType, setMediaType] = useState<"image" | "video" | "youtube" | null>(null);
+  const [mediaType, setMediaType] = useState<"image" | "video" | "youtube" | "instagram" | "tiktok" | null>(null);
   const [donationMessage, setDonationMessage] = useState<{
     donorName: string;
     amount: number; // Integer amount
@@ -60,9 +110,11 @@ export default function GiftPage() {
   } | null>(null);
   const [remainingTime, setRemainingTime] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
+  const [videoDuration, setVideoDuration] = useState<number>(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -117,11 +169,15 @@ export default function GiftPage() {
               case "media":
                 if (data.mediaUrl) {
                   setMediaUrl(data.mediaUrl);
-                  // Auto-detect YouTube or use provided mediaType
+                  // Auto-detect platform or use provided mediaType
                   if (isYouTubeUrl(data.mediaUrl)) {
                     setMediaType("youtube");
+                  } else if (isInstagramUrl(data.mediaUrl)) {
+                    setMediaType("instagram");
+                  } else if (isTikTokUrl(data.mediaUrl)) {
+                    setMediaType("tiktok");
                   } else {
-                    setMediaType((data.mediaType as "image" | "video") || "image");
+                    setMediaType((data.mediaType as "image" | "video" | "youtube" | "instagram" | "tiktok") || "image");
                   }
                 }
                 break;
@@ -168,66 +224,170 @@ export default function GiftPage() {
     };
   }, []);
 
-  // Auto-hide based on donation amount (10k = 1 menit, setiap kelipatan 10k = +1 menit)
+  // Auto-hide based on donation amount
+  // Progress bar always follows donation duration, video stops when finished but content stays
   useEffect(() => {
-    if (donationMessage) {
-      const duration = calculateDisplayDuration(donationMessage.amount);
-      
-      // Initialize state in next tick to avoid cascading renders
-      setTimeout(() => {
-        setTotalDuration(duration);
-        setRemainingTime(duration);
-      }, 0);
-
-      // Update progress bar every second
-      progressIntervalRef.current = setInterval(() => {
-        setRemainingTime((prev) => {
-          const newTime = Math.max(0, prev - 1000);
-          if (newTime <= 0) {
-            if (progressIntervalRef.current) {
-              clearInterval(progressIntervalRef.current);
-            }
-          }
-          return newTime;
-        });
-      }, 1000);
-
-      const timer = setTimeout(() => {
-        setMediaUrl(null);
-        setMediaType(null);
-        setDonationMessage(null);
-        setRemainingTime(0);
-        setTotalDuration(0);
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-        }
-      }, duration);
-
-      return () => {
-        clearTimeout(timer);
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-        }
-      };
-    } else if (mediaUrl && !donationMessage) {
-      // If only media without donation, use default 10 seconds
-      const timer = setTimeout(() => {
-        setMediaUrl(null);
-        setMediaType(null);
-      }, 10000);
-
-      return () => clearTimeout(timer);
-    } else {
+    if (!donationMessage) {
       // Clean up when no donation message
-      setTimeout(() => {
-        setRemainingTime(0);
-        setTotalDuration(0);
-      }, 0);
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
       }
+      setTimeout(() => {
+        setRemainingTime(0);
+        setTotalDuration(0);
+      }, 0);
+      return;
     }
-  }, [mediaUrl, donationMessage]);
+
+    const donationDuration = calculateDisplayDuration(donationMessage.amount);
+    
+    // Always use donation duration for progress bar and closing
+    const finalDuration = donationDuration;
+    
+    // Initialize state in next tick
+    setTimeout(() => {
+      setTotalDuration(finalDuration);
+      setRemainingTime(finalDuration);
+    }, 0);
+
+    // Update progress bar every second
+    progressIntervalRef.current = setInterval(() => {
+      setRemainingTime((prev) => {
+        const newTime = Math.max(0, prev - 1000);
+        if (newTime <= 0) {
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
+          // Close when time is up
+          setMediaUrl(null);
+          setMediaType(null);
+          setDonationMessage(null);
+          setRemainingTime(0);
+          setTotalDuration(0);
+          setVideoDuration(0);
+        }
+        return newTime;
+      });
+    }, 1000);
+
+    const timer = setTimeout(() => {
+      setMediaUrl(null);
+      setMediaType(null);
+      setDonationMessage(null);
+      setRemainingTime(0);
+      setTotalDuration(0);
+      setVideoDuration(0);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    }, finalDuration);
+
+    return () => {
+      clearTimeout(timer);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+  }, [donationMessage]);
+
+  // Handle media without donation (video only)
+  useEffect(() => {
+    if (mediaUrl && !donationMessage && mediaType === "video") {
+      const finalDuration = videoDuration > 0 ? videoDuration * 1000 : 10000;
+      const timer = setTimeout(() => {
+        setMediaUrl(null);
+        setMediaType(null);
+        setVideoDuration(0);
+      }, finalDuration);
+
+      return () => clearTimeout(timer);
+    }
+  }, [mediaUrl, donationMessage, mediaType, videoDuration]);
+
+  // Handle video metadata loaded and video ended event
+  useEffect(() => {
+    if (videoRef.current && mediaType === "video") {
+      const video = videoRef.current;
+      
+      const handleLoadedMetadata = () => {
+        if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
+          setVideoDuration(video.duration);
+        }
+      };
+
+      const handleEnded = () => {
+        // Video ends - just pause it, don't close content
+        // Content will stay until donation duration is finished
+        video.pause();
+        // Prevent video from restarting
+        video.currentTime = video.duration;
+      };
+
+      const handleTimeUpdate = () => {
+        // Prevent video from looping by resetting to end if it tries to restart
+        if (video.ended && video.currentTime < video.duration) {
+          video.pause();
+          video.currentTime = video.duration;
+        }
+      };
+
+      video.addEventListener("loadedmetadata", handleLoadedMetadata);
+      video.addEventListener("ended", handleEnded);
+      video.addEventListener("timeupdate", handleTimeUpdate);
+
+      // Check if already loaded
+      if (video.readyState >= 1) {
+        handleLoadedMetadata();
+      }
+
+      return () => {
+        video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        video.removeEventListener("ended", handleEnded);
+        video.removeEventListener("timeupdate", handleTimeUpdate);
+      };
+    }
+  }, [mediaUrl, mediaType]);
+
+  // Load TikTok embed script when TikTok media is shown
+  useEffect(() => {
+    if (mediaType === "tiktok" && mediaUrl) {
+      const loadTikTok = () => {
+        // Force TikTok to re-render embed
+        // @ts-expect-error - TikTok embed global function is injected by embed.js
+        if (window.tiktokEmbedLoad) {
+          // @ts-expect-error - TikTok embed global function is injected by embed.js
+          window.tiktokEmbedLoad();
+        }
+      };
+
+      // Check if script already exists
+      const existingScript = document.querySelector('script[src="https://www.tiktok.com/embed.js"]');
+      
+      if (!existingScript) {
+        const script = document.createElement("script");
+        script.src = "https://www.tiktok.com/embed.js";
+        script.async = true;
+        script.onload = loadTikTok;
+        document.body.appendChild(script);
+      } else {
+        // Script already loaded, trigger re-render
+        setTimeout(loadTikTok, 100);
+      }
+
+      // Also trigger after a short delay to ensure DOM is ready
+      const timeoutId = setTimeout(() => {
+        loadTikTok();
+      }, 500);
+
+      return () => {
+        clearTimeout(timeoutId);
+      };
+    }
+  }, [mediaType, mediaUrl]);
 
   // Helper function to format time as MM:SS
   const formatTime = (ms: number): string => {
@@ -264,10 +424,11 @@ export default function GiftPage() {
           )}
           {mediaType === "video" && (
             <video
+              ref={videoRef}
               src={mediaUrl}
               autoPlay
-              loop
               playsInline
+              loop={false}
               className="w-full h-full object-contain"
             />
           )}
@@ -279,6 +440,38 @@ export default function GiftPage() {
               allowFullScreen
               style={{ border: "none" }}
             />
+          )}
+          {mediaType === "instagram" && extractInstagramId(mediaUrl) && (() => {
+            const instagramData = extractInstagramId(mediaUrl);
+            if (!instagramData) return null;
+            
+            const embedUrl = instagramData.type === "reel"
+              ? `https://www.instagram.com/reel/${instagramData.id}/embed/?autoplay=1&playsinline=1`
+              : `https://www.instagram.com/p/${instagramData.id}/embed/?autoplay=1&playsinline=1`;
+            
+            return (
+              <iframe
+                src={embedUrl}
+                className="w-full h-full"
+                allow="encrypted-media; autoplay; fullscreen"
+                allowFullScreen
+                style={{ border: "none" }}
+                scrolling="no"
+                frameBorder="0"
+              />
+            );
+          })()}
+          {mediaType === "tiktok" && mediaUrl && extractTikTokId(mediaUrl) && (
+            <div className="w-full h-full flex items-center justify-center bg-black">
+              <blockquote
+                className="tiktok-embed"
+                cite={mediaUrl}
+                data-video-id={extractTikTokId(mediaUrl)!}
+                style={{ maxWidth: "100%", minWidth: "325px" }}
+              >
+                <section />
+              </blockquote>
+            </div>
           )}
         </div>
       )}
