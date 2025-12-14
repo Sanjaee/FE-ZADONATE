@@ -3,10 +3,13 @@
 import React, { useState, useEffect, useRef } from "react";
 
 interface TextMessage {
+  id?: string; // UUID for tracking this donation
   type: string;
   donorName?: string;
   amount?: number;
   message?: string;
+  duration?: number; // Display duration in milliseconds (from backend)
+  visible?: boolean;
 }
 
 // TTS function - Browser built-in with high quality, clear, and slow
@@ -164,15 +167,19 @@ function calculateDisplayDuration(amount: number): number {
 
 export default function TextPage() {
   const [textMessage, setTextMessage] = useState<{
+    id: string; // UUID for tracking
     donorName: string;
     amount: number;
     message?: string;
   } | null>(null);
+  const [currentDonationId, setCurrentDonationId] = useState<string | null>(null);
+  const [isVisible, setIsVisible] = useState<boolean>(true);
   const [remainingTime, setRemainingTime] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pauseStartTimeRef = useRef<number | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -182,9 +189,17 @@ export default function TextPage() {
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {
+        // Close existing connection if any
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          console.log("🔄 Closing existing WebSocket connection before reconnecting");
+          wsRef.current.close();
+        }
+
         const ws = new WebSocket(wsUrl);
+        console.log("🔌 Attempting WebSocket connection to:", wsUrl);
 
         ws.onopen = () => {
+          console.log("✅ WebSocket connected successfully");
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
@@ -208,17 +223,38 @@ export default function TextPage() {
               try {
                 const data: TextMessage = JSON.parse(trimmed);
 
-                if (data.type === "text" && data.donorName && data.amount !== undefined && data.amount > 0) {
+                if (data.type === "text" && data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
                   // Validate message max 160 characters
                   const message = data.message && data.message.length > 160 
                     ? data.message.substring(0, 160) 
                     : data.message;
                   
+                  // Use duration from backend, fallback to calculated if not provided
+                  const duration = data.duration || calculateDisplayDuration(data.amount);
+                  
+                  console.log("📥 Received text donation:", {
+                    id: data.id,
+                    donorName: data.donorName,
+                    amount: data.amount,
+                    durationFromBackend: data.duration,
+                    calculatedDuration: calculateDisplayDuration(data.amount),
+                    finalDuration: duration,
+                  });
+                  
+                  // Set duration FIRST before setting text message
+                  // This ensures useEffect has the correct duration when it runs
+                  setTotalDuration(duration);
+                  setRemainingTime(duration);
+                  
                   setTextMessage({
+                    id: data.id,
                     donorName: data.donorName,
                     amount: data.amount,
                     message: message,
                   });
+                  setCurrentDonationId(data.id);
+                  setIsVisible(true);
+                  pauseStartTimeRef.current = null;
 
                   // TTS: Speak the donation message (with small delay to ensure state is set)
                   const amount = data.amount;
@@ -228,6 +264,24 @@ export default function TextPage() {
                       console.log("Attempting to speak:", ttsText);
                       speak(ttsText);
                     }, 100);
+                  }
+                }
+
+                if (data.type === "visibility") {
+                  // Handle visibility for current donation
+                  if (data.id && data.id === currentDonationId) {
+                    setIsVisible(data.visible ?? true);
+                    if (data.visible) {
+                      // Resumed - adjust remaining time if was paused
+                      if (pauseStartTimeRef.current !== null) {
+                        const pauseDuration = Date.now() - pauseStartTimeRef.current;
+                        setRemainingTime((prev) => prev + pauseDuration);
+                        pauseStartTimeRef.current = null;
+                      }
+                    } else {
+                      // Paused - record pause start time
+                      pauseStartTimeRef.current = Date.now();
+                    }
                   }
                 }
               } catch {
@@ -240,23 +294,47 @@ export default function TextPage() {
           }
         };
 
-        ws.onerror = () => {
-          // Silent error handling
+        ws.onerror = (error) => {
+          console.error("❌ WebSocket error:", error);
+          // Try to reconnect immediately on error
+          if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+            if (!reconnectTimeoutRef.current) {
+              reconnectTimeoutRef.current = setTimeout(() => {
+                console.log("🔄 Reconnecting WebSocket after error...");
+                connectWebSocket();
+              }, 1000);
+            }
+          }
         };
 
-        ws.onclose = () => {
-          // Reconnect after 3 seconds
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connectWebSocket();
-          }, 3000);
+        ws.onclose = (event) => {
+          console.log("🔌 WebSocket closed:", {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          });
+          
+          // Only reconnect if not manually closed
+          if (event.code !== 1000) {
+            if (!reconnectTimeoutRef.current) {
+              console.log("🔄 Scheduling WebSocket reconnection in 3 seconds...");
+              reconnectTimeoutRef.current = setTimeout(() => {
+                connectWebSocket();
+              }, 3000);
+            }
+          }
         };
 
         wsRef.current = ws;
-      } catch {
+      } catch (error) {
+        console.error("❌ WebSocket connection failed:", error);
         // Retry connection after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 3000);
+        if (!reconnectTimeoutRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            console.log("🔄 Retrying WebSocket connection...");
+            connectWebSocket();
+          }, 3000);
+        }
       }
     };
 
@@ -272,7 +350,7 @@ export default function TextPage() {
     };
   }, []);
 
-  // Auto-hide based on donation amount
+  // Auto-hide based on donation duration from backend
   useEffect(() => {
     if (!textMessage) {
       // Clean up when no text message
@@ -287,17 +365,25 @@ export default function TextPage() {
       return;
     }
 
-    const donationDuration = calculateDisplayDuration(textMessage.amount);
-    const finalDuration = donationDuration;
+    // Get duration from state or calculate fallback
+    // Duration should already be set from websocket handler, but use fallback if not
+    const currentDuration = totalDuration > 0 ? totalDuration : calculateDisplayDuration(textMessage.amount);
     
-    // Initialize state in next tick
-    setTimeout(() => {
-      setTotalDuration(finalDuration);
-      setRemainingTime(finalDuration);
-    }, 0);
+    console.log("⏱️ Timer setup:", {
+      donationId: textMessage.id,
+      amount: textMessage.amount,
+      totalDuration,
+      calculatedDuration: calculateDisplayDuration(textMessage.amount),
+      currentDuration,
+    });
 
-    // Update progress bar every second
+    // Update progress bar every second (only when visible)
     progressIntervalRef.current = setInterval(() => {
+      if (!isVisible) {
+        // Don't count down when paused
+        return;
+      }
+      
       setRemainingTime((prev) => {
         const newTime = Math.max(0, prev - 1000);
         if (newTime <= 0) {
@@ -307,22 +393,29 @@ export default function TextPage() {
           }
           // Close when time is up
           setTextMessage(null);
+          setCurrentDonationId(null);
           setRemainingTime(0);
           setTotalDuration(0);
+          setIsVisible(true);
+          pauseStartTimeRef.current = null;
         }
         return newTime;
       });
     }, 1000);
 
+    // Use currentDuration for timer
     const timer = setTimeout(() => {
       setTextMessage(null);
+      setCurrentDonationId(null);
       setRemainingTime(0);
       setTotalDuration(0);
+      setIsVisible(true);
+      pauseStartTimeRef.current = null;
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
-    }, finalDuration);
+    }, currentDuration);
 
     return () => {
       clearTimeout(timer);
@@ -331,7 +424,7 @@ export default function TextPage() {
         progressIntervalRef.current = null;
       }
     };
-  }, [textMessage]);
+  }, [textMessage, isVisible, totalDuration]);
 
   // Helper function to format time as MM:SS
   const formatTime = (ms: number): string => {
@@ -346,8 +439,12 @@ export default function TextPage() {
     ? ((totalDuration - remainingTime) / totalDuration) * 100 
     : 0;
 
-  // Completely hidden when no content
+  // Completely hidden when no content or when paused
   if (!textMessage) {
+    return <div className="hidden" />;
+  }
+
+  if (!isVisible) {
     return <div className="hidden" />;
   }
 

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 
 interface DonationMessage {
+  id?: string; // UUID for tracking this donation
   type: string;
   donorName?: string;
   amount?: number; // Integer amount
@@ -12,6 +13,7 @@ interface DonationMessage {
   mediaType?: string;
   startTime?: number; // Start time in seconds for YouTube videos (legacy)
   targetTime?: string | number; // Start time in seconds for YouTube videos (can be string or number)
+  duration?: number; // Display duration in milliseconds (from backend)
   visible?: boolean;
 }
 
@@ -107,10 +109,13 @@ export default function GiftPage() {
   const [mediaType, setMediaType] = useState<"image" | "video" | "youtube" | "instagram" | "tiktok" | null>(null);
   const [startTime, setStartTime] = useState<number>(0); // Start time in seconds for YouTube videos
   const [donationMessage, setDonationMessage] = useState<{
+    id: string; // UUID for tracking
     donorName: string;
     amount: number; // Integer amount
     message?: string;
   } | null>(null);
+  const [currentDonationId, setCurrentDonationId] = useState<string | null>(null);
+  const [isVisible, setIsVisible] = useState<boolean>(true);
   const [remainingTime, setRemainingTime] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
   const [videoDuration, setVideoDuration] = useState<number>(0);
@@ -118,6 +123,7 @@ export default function GiftPage() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pauseStartTimeRef = useRef<number | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -127,9 +133,17 @@ export default function GiftPage() {
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {
-        const ws = new WebSocket(wsUrl);
+        // Close existing connection if any
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          console.log("🔄 Closing existing WebSocket connection before reconnecting");
+          wsRef.current.close();
+        }
 
+        const ws = new WebSocket(wsUrl);
+        console.log("🔌 Attempting WebSocket connection to:", wsUrl);
+        
         ws.onopen = () => {
+          console.log("✅ WebSocket connected successfully");
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
@@ -155,23 +169,47 @@ export default function GiftPage() {
 
                  switch (data.type) {
                    case "donation":
-                     if (data.donorName && data.amount !== undefined && data.amount > 0) {
+                     if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
                        // Validate message max 160 characters
                        const message = data.message && data.message.length > 160 
                          ? data.message.substring(0, 160) 
                          : data.message;
                        
+                       // Use duration from backend, fallback to calculated if not provided
+                       const duration = data.duration || calculateDisplayDuration(data.amount);
+                       
+                       console.log("📥 Received donation:", {
+                         id: data.id,
+                         donorName: data.donorName,
+                         amount: data.amount,
+                         durationFromBackend: data.duration,
+                         calculatedDuration: calculateDisplayDuration(data.amount),
+                         finalDuration: duration,
+                       });
+                       
+                       // Set duration FIRST before setting donation message
+                       // This ensures useEffect has the correct duration when it runs
+                       setTotalDuration(duration);
+                       setRemainingTime(duration);
+                       
                        setDonationMessage({
+                         id: data.id,
                          donorName: data.donorName,
                          amount: data.amount,
                          message: message,
                        });
+                       setCurrentDonationId(data.id);
+                       setIsVisible(true);
+                       pauseStartTimeRef.current = null;
                      }
                      break;
 
               case "media":
-                if (data.mediaUrl) {
+                if (data.mediaUrl && data.id) {
                   setMediaUrl(data.mediaUrl);
+                  setCurrentDonationId(data.id);
+                  setIsVisible(true);
+                  pauseStartTimeRef.current = null;
                   // Set start time for YouTube videos - prioritize targetTime over startTime
                   let parsedStartTime = 0;
                   if (data.targetTime !== undefined) {
@@ -201,6 +239,24 @@ export default function GiftPage() {
                   }
                 }
                 break;
+
+              case "visibility":
+                // Handle visibility for current donation
+                if (data.id && data.id === currentDonationId) {
+                  setIsVisible(data.visible ?? true);
+                  if (data.visible) {
+                    // Resumed - adjust remaining time if was paused
+                    if (pauseStartTimeRef.current !== null) {
+                      const pauseDuration = Date.now() - pauseStartTimeRef.current;
+                      setRemainingTime((prev) => prev + pauseDuration);
+                      pauseStartTimeRef.current = null;
+                    }
+                  } else {
+                    // Paused - record pause start time
+                    pauseStartTimeRef.current = Date.now();
+                  }
+                }
+                break;
                 }
               } catch {
                 // Skip invalid JSON messages
@@ -212,23 +268,47 @@ export default function GiftPage() {
           }
         };
 
-        ws.onerror = () => {
-          // Silent error handling
+        ws.onerror = (error) => {
+          console.error("❌ WebSocket error:", error);
+          // Try to reconnect immediately on error
+          if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+            if (!reconnectTimeoutRef.current) {
+              reconnectTimeoutRef.current = setTimeout(() => {
+                console.log("🔄 Reconnecting WebSocket after error...");
+                connectWebSocket();
+              }, 1000);
+            }
+          }
         };
 
-        ws.onclose = () => {
-          // Reconnect after 3 seconds
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connectWebSocket();
-          }, 3000);
+        ws.onclose = (event) => {
+          console.log("🔌 WebSocket closed:", {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          });
+          
+          // Only reconnect if not manually closed
+          if (event.code !== 1000) {
+            if (!reconnectTimeoutRef.current) {
+              console.log("🔄 Scheduling WebSocket reconnection in 3 seconds...");
+              reconnectTimeoutRef.current = setTimeout(() => {
+                connectWebSocket();
+              }, 3000);
+            }
+          }
         };
 
         wsRef.current = ws;
-      } catch {
+      } catch (error) {
+        console.error("❌ WebSocket connection failed:", error);
         // Retry connection after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 3000);
+        if (!reconnectTimeoutRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            console.log("🔄 Retrying WebSocket connection...");
+            connectWebSocket();
+          }, 3000);
+        }
       }
     };
 
@@ -244,7 +324,7 @@ export default function GiftPage() {
     };
   }, []);
 
-  // Auto-hide based on donation amount
+  // Auto-hide based on donation duration from backend
   // Progress bar always follows donation duration, video stops when finished but content stays
   useEffect(() => {
     if (!donationMessage) {
@@ -260,19 +340,25 @@ export default function GiftPage() {
       return;
     }
 
-    const donationDuration = calculateDisplayDuration(donationMessage.amount);
+    // Get duration from state or calculate fallback
+    // Duration should already be set from websocket handler, but use fallback if not
+    const currentDuration = totalDuration > 0 ? totalDuration : calculateDisplayDuration(donationMessage.amount);
     
-    // Always use donation duration for progress bar and closing
-    const finalDuration = donationDuration;
-    
-    // Initialize state in next tick
-    setTimeout(() => {
-      setTotalDuration(finalDuration);
-      setRemainingTime(finalDuration);
-    }, 0);
+    console.log("⏱️ Timer setup:", {
+      donationId: donationMessage.id,
+      amount: donationMessage.amount,
+      totalDuration,
+      calculatedDuration: calculateDisplayDuration(donationMessage.amount),
+      currentDuration,
+    });
 
-    // Update progress bar every second
+    // Update progress bar every second (only when visible)
     progressIntervalRef.current = setInterval(() => {
+      if (!isVisible) {
+        // Don't count down when paused
+        return;
+      }
+      
       setRemainingTime((prev) => {
         const newTime = Math.max(0, prev - 1000);
         if (newTime <= 0) {
@@ -285,27 +371,34 @@ export default function GiftPage() {
           setMediaType(null);
           setStartTime(0);
           setDonationMessage(null);
+          setCurrentDonationId(null);
           setRemainingTime(0);
           setTotalDuration(0);
           setVideoDuration(0);
+          setIsVisible(true);
+          pauseStartTimeRef.current = null;
         }
         return newTime;
       });
     }, 1000);
 
+    // Use currentDuration for timer
     const timer = setTimeout(() => {
       setMediaUrl(null);
       setMediaType(null);
       setStartTime(0);
       setDonationMessage(null);
+      setCurrentDonationId(null);
       setRemainingTime(0);
       setTotalDuration(0);
       setVideoDuration(0);
+      setIsVisible(true);
+      pauseStartTimeRef.current = null;
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
-    }, finalDuration);
+    }, currentDuration);
 
     return () => {
       clearTimeout(timer);
@@ -314,7 +407,7 @@ export default function GiftPage() {
         progressIntervalRef.current = null;
       }
     };
-  }, [donationMessage]);
+  }, [donationMessage, isVisible, totalDuration]);
 
   // Handle media without donation (video only)
   useEffect(() => {
@@ -425,8 +518,12 @@ export default function GiftPage() {
     ? ((totalDuration - remainingTime) / totalDuration) * 100 
     : 0;
 
-  // Completely hidden when no content
+  // Completely hidden when no content or when paused
   if (!mediaUrl && !donationMessage) {
+    return <div className="hidden" />;
+  }
+
+  if (!isVisible) {
     return <div className="hidden" />;
   }
 
