@@ -150,6 +150,30 @@ function speak(text: string) {
   }
 }
 
+// Helper function to calculate TTS duration based on text length
+// Rate 0.75 means slower speech, approximately 100-150 words per minute
+// Average: ~2 characters per word, so ~150-225 characters per minute
+// Using conservative estimate: ~200 characters per minute = ~3.3 chars per second
+function calculateTTSDuration(text: string): number {
+  if (!text || text.length === 0) {
+    return 0;
+  }
+  
+  // Rate 0.75 means 75% of normal speed
+  // Normal speed: ~150 words/min = ~300 chars/min = ~5 chars/sec
+  // At 0.75 rate: ~3.75 chars/sec
+  // Add buffer for pauses between sentences
+  const charsPerSecond = 3.5; // Conservative estimate for rate 0.75
+  const baseDuration = (text.length / charsPerSecond) * 1000; // Convert to milliseconds
+  
+  // Add extra time for pauses (300ms per sentence break)
+  const sentenceBreaks = (text.match(/[.!?]/g) || []).length;
+  const pauseTime = sentenceBreaks * 300;
+  
+  // Minimum 2 seconds for very short text
+  return Math.max(2000, baseDuration + pauseTime);
+}
+
 // Helper function to calculate display duration based on donation amount
 // 1000 = 10 detik, setiap kelipatan 1000 = +10 detik
 function calculateDisplayDuration(amount: number): number {
@@ -180,6 +204,8 @@ export default function TextPage() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pauseStartTimeRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -224,47 +250,147 @@ export default function TextPage() {
                 const data: TextMessage = JSON.parse(trimmed);
 
                 if (data.type === "text" && data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
-                  // Validate message max 160 characters
-                  const message = data.message && data.message.length > 160 
-                    ? data.message.substring(0, 160) 
-                    : data.message;
+                  // Validate message max 250 characters (only for text donations)
+                  // Handle undefined, null, or empty string
+                  let message = data.message || "";
+                  if (typeof message === "string" && message.length > 250) {
+                    message = message.substring(0, 250);
+                  }
+                  
+                  // Calculate TTS duration based on text length
+                  const ttsText = `${data.donorName} baru saja memberikan Rp${data.amount.toLocaleString("id-ID")}${message ? `. ${message}` : ""}`;
+                  const ttsDuration = calculateTTSDuration(ttsText);
                   
                   // Use duration from backend, fallback to calculated if not provided
-                  const duration = data.duration || calculateDisplayDuration(data.amount);
+                  const amountBasedDuration = data.duration || calculateDisplayDuration(data.amount);
+                  
+                  // Text display duration: always 10 seconds (text will disappear after 10 seconds)
+                  // BGM plays for 2 seconds, then TTS starts
+                  // Text disappears after 10 seconds regardless of TTS duration
+                  const finalDuration = 10000; // Always 10 seconds for text display
                   
                   console.log("📥 Received text donation:", {
                     id: data.id,
                     donorName: data.donorName,
                     amount: data.amount,
+                    message: message,
+                    messageLength: message ? message.length : 0,
                     durationFromBackend: data.duration,
-                    calculatedDuration: calculateDisplayDuration(data.amount),
-                    finalDuration: duration,
+                    amountBasedDuration,
+                    ttsDuration,
+                    ttsTextLength: ttsText.length,
+                    finalDuration,
                   });
                   
                   // Set duration FIRST before setting text message
                   // This ensures useEffect has the correct duration when it runs
-                  setTotalDuration(duration);
-                  setRemainingTime(duration);
+                  setTotalDuration(finalDuration);
+                  setRemainingTime(finalDuration);
                   
                   setTextMessage({
                     id: data.id,
                     donorName: data.donorName,
                     amount: data.amount,
-                    message: message,
+                    message: message, // Always set message, even if empty string
                   });
                   setCurrentDonationId(data.id);
                   setIsVisible(true);
                   pauseStartTimeRef.current = null;
 
-                  // TTS: Speak the donation message (with small delay to ensure state is set)
-                  const amount = data.amount;
-                  if (amount !== undefined) {
-                    setTimeout(() => {
-                      const ttsText = `${data.donorName} baru saja memberikan Rp${amount.toLocaleString("id-ID")}${message ? `. ${message}` : ""}`;
-                      console.log("Attempting to speak:", ttsText);
-                      speak(ttsText);
-                    }, 100);
+                  // Play BGM first for 2 seconds, then TTS will start
+                  if (audioRef.current) {
+                    console.log("🎵 Attempting to play BGM for 2 seconds...");
+                    audioRef.current.currentTime = 0; // Reset to start
+                    
+                    // Check if audio is ready
+                    if (audioRef.current.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+                      audioRef.current.play()
+                        .then(() => {
+                          console.log("✅ BGM playing successfully");
+                          
+                          // Stop BGM after 2 seconds
+                          setTimeout(() => {
+                            if (audioRef.current) {
+                              audioRef.current.pause();
+                              audioRef.current.currentTime = 0;
+                              console.log("🛑 BGM stopped after 2 seconds");
+                            }
+                          }, 2000);
+                        })
+                        .catch((err) => {
+                          console.error("❌ Failed to play BGM:", err);
+                          console.error("Error details:", {
+                            name: err.name,
+                            message: err.message,
+                            readyState: audioRef.current?.readyState,
+                            networkState: audioRef.current?.networkState,
+                          });
+                          
+                          // Try to load again if failed
+                          if (audioRef.current) {
+                            audioRef.current.load();
+                            setTimeout(() => {
+                              if (audioRef.current) {
+                                audioRef.current.play()
+                                  .then(() => {
+                                    // Stop BGM after 2 seconds
+                                    setTimeout(() => {
+                                      if (audioRef.current) {
+                                        audioRef.current.pause();
+                                        audioRef.current.currentTime = 0;
+                                        console.log("🛑 BGM stopped after 2 seconds");
+                                      }
+                                    }, 2000);
+                                  })
+                                  .catch((retryErr) => {
+                                    console.error("❌ Retry play also failed:", retryErr);
+                                  });
+                              }
+                            }, 100);
+                          }
+                        });
+                    } else {
+                      console.warn("⚠️ Audio not ready yet, readyState:", audioRef.current.readyState);
+                      // Wait for audio to be ready
+                      const onCanPlay = () => {
+                        if (audioRef.current) {
+                          audioRef.current.play()
+                            .then(() => {
+                              // Stop BGM after 2 seconds
+                              setTimeout(() => {
+                                if (audioRef.current) {
+                                  audioRef.current.pause();
+                                  audioRef.current.currentTime = 0;
+                                  console.log("🛑 BGM stopped after 2 seconds");
+                                }
+                              }, 2000);
+                            })
+                            .catch((err) => {
+                              console.error("❌ Failed to play BGM after ready:", err);
+                            });
+                          audioRef.current.removeEventListener("canplay", onCanPlay);
+                        }
+                      };
+                      audioRef.current.addEventListener("canplay", onCanPlay);
+                    }
+                  } else {
+                    console.error("❌ audioRef.current is null!");
                   }
+
+                  // TTS: Speak the donation message AFTER BGM starts (2 seconds delay)
+                  // TTS will only speak once (no looping)
+                  // TTS will be stopped after 10 seconds total (8 seconds after TTS starts)
+                  setTimeout(() => {
+                    console.log("🎤 Starting TTS after BGM (2 seconds delay):", ttsText);
+                    speak(ttsText);
+                    
+                    // Stop TTS after 10 seconds total (8 seconds after TTS starts)
+                    ttsStopTimeoutRef.current = setTimeout(() => {
+                      console.log("🛑 Stopping TTS after 10 seconds total");
+                      window.speechSynthesis.cancel();
+                      ttsStopTimeoutRef.current = null;
+                    }, 8000); // 8 seconds after TTS starts = 10 seconds total
+                  }, 2000); // Wait 2 seconds for BGM to start
                 }
 
                 if (data.type === "visibility") {
@@ -278,9 +404,19 @@ export default function TextPage() {
                         setRemainingTime((prev) => prev + pauseDuration);
                         pauseStartTimeRef.current = null;
                       }
+                      // Resume BGM
+                      if (audioRef.current) {
+                        audioRef.current.play().catch((err) => {
+                          console.warn("Failed to resume BGM:", err);
+                        });
+                      }
                     } else {
                       // Paused - record pause start time
                       pauseStartTimeRef.current = Date.now();
+                      // Pause BGM
+                      if (audioRef.current) {
+                        audioRef.current.pause();
+                      }
                     }
                   }
                 }
@@ -350,6 +486,58 @@ export default function TextPage() {
     };
   }, []);
 
+  // Initialize audio element
+  useEffect(() => {
+    if (!audioRef.current) {
+      const audio = new Audio("/bgm.mp3");
+      audio.loop = false; // Play once, no looping
+      audio.preload = "auto";
+      
+      // Set volume (some browsers require this for autoplay)
+      audio.volume = 1.0;
+      
+      // Add error handling
+      audio.addEventListener("error", (e) => {
+        console.error("❌ Audio error:", e);
+        console.error("Audio error details:", {
+          code: audio.error?.code,
+          message: audio.error?.message,
+          src: audio.src,
+        });
+      });
+      
+      audio.addEventListener("loadeddata", () => {
+        console.log("✅ BGM audio loaded successfully");
+      });
+      
+      audio.addEventListener("canplay", () => {
+        console.log("✅ BGM audio ready to play");
+      });
+      
+      audio.addEventListener("loadstart", () => {
+        console.log("🔄 BGM audio loading started");
+      });
+      
+      // Try to preload by loading the audio (this helps with autoplay policy)
+      try {
+        audio.load();
+      } catch (err) {
+        console.warn("⚠️ Audio preload warning:", err);
+      }
+      
+      audioRef.current = audio;
+      console.log("🎵 BGM audio initialized:", audio.src);
+    }
+
+    return () => {
+      // Cleanup audio on unmount
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   // Auto-hide based on donation duration from backend
   useEffect(() => {
     if (!textMessage) {
@@ -398,6 +586,17 @@ export default function TextPage() {
           setTotalDuration(0);
           setIsVisible(true);
           pauseStartTimeRef.current = null;
+          // Stop BGM
+          if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+          }
+          // Stop TTS
+          window.speechSynthesis.cancel();
+          if (ttsStopTimeoutRef.current) {
+            clearTimeout(ttsStopTimeoutRef.current);
+            ttsStopTimeoutRef.current = null;
+          }
         }
         return newTime;
       });
@@ -411,6 +610,17 @@ export default function TextPage() {
       setTotalDuration(0);
       setIsVisible(true);
       pauseStartTimeRef.current = null;
+      // Stop BGM
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      // Stop TTS
+      window.speechSynthesis.cancel();
+      if (ttsStopTimeoutRef.current) {
+        clearTimeout(ttsStopTimeoutRef.current);
+        ttsStopTimeoutRef.current = null;
+      }
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
@@ -485,7 +695,7 @@ export default function TextPage() {
               </div>
 
               {/* Line 2: Optional message - moved down */}
-              {textMessage.message && (
+              {textMessage.message && textMessage.message.trim().length > 0 && (
                 <div className="text-zinc-300 text-[30px] mt-2 break-words max-w-full px-4" style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>
                   {textMessage.message}
                 </div>
