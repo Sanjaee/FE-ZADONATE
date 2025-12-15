@@ -31,7 +31,7 @@ export default function TimePage() {
   useEffect(() => {
     const connectWebSocket = () => {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:8080";
+      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000";
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {

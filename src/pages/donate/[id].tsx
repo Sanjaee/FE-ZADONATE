@@ -60,7 +60,7 @@ export default function PaymentDetailPage() {
   const wsRef = React.useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
   const fetchPayment = useCallback(async () => {
     if (!id) return;
@@ -130,7 +130,7 @@ export default function PaymentDetailPage() {
 
     const connectWebSocket = () => {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:8080";
+      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000";
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {

@@ -43,7 +43,7 @@ export default function HistoryPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
   const fetchHistory = useCallback(async (currentOffset: number) => {
     try {
@@ -86,7 +86,7 @@ export default function HistoryPage() {
   useEffect(() => {
     const connectWebSocket = () => {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:8080";
+      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000";
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {

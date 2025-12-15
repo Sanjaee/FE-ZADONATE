@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_WS_HOST: process.env.NEXT_PUBLIC_WS_HOST || "localhost:8080",
+    NEXT_PUBLIC_WS_HOST: process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000",
   },
   images: {
     domains: [
