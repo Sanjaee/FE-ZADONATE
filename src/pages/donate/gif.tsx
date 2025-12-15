@@ -206,6 +206,42 @@ export default function GiftPage() {
                      }
                      break;
 
+                   case "text":
+                     // Handle text donations (same as donation for gif page)
+                     if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
+                       // Validate message max 160 characters
+                       const message = data.message && data.message.length > 160 
+                         ? data.message.substring(0, 160) 
+                         : data.message;
+                       
+                       // Use duration from backend, fallback to calculated if not provided
+                       const duration = data.duration || calculateDisplayDuration(data.amount);
+                       
+                       console.log("📥 Received text donation:", {
+                         id: data.id,
+                         donorName: data.donorName,
+                         amount: data.amount,
+                         durationFromBackend: data.duration,
+                         calculatedDuration: calculateDisplayDuration(data.amount),
+                         finalDuration: duration,
+                       });
+                       
+                       // Set duration FIRST before setting donation message
+                       setTotalDuration(duration);
+                       setRemainingTime(duration);
+                       
+                       setDonationMessage({
+                         id: data.id,
+                         donorName: data.donorName,
+                         amount: data.amount,
+                         message: message,
+                       });
+                       setCurrentDonationId(data.id);
+                       setIsVisible(true);
+                       pauseStartTimeRef.current = null;
+                     }
+                     break;
+
               case "media":
                 if (data.mediaUrl && data.id) {
                   setMediaUrl(data.mediaUrl);
