@@ -130,7 +130,9 @@ export default function PaymentDetailPage() {
 
     const connectWebSocket = () => {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000";
+      let wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost:5000";
+      // Remove protocol if present (http:// or https://)
+      wsHost = wsHost.replace(/^https?:\/\//, "");
       const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
       try {
