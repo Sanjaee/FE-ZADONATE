@@ -43,6 +43,7 @@ declare namespace YT {
     getDuration(): number;
     pauseVideo(): void;
     playVideo(): void;
+    seekTo(seconds: number, allowSeekAhead: boolean): void;
     destroy(): void;
   }
 }
