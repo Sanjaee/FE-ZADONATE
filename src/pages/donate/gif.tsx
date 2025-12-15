@@ -124,6 +124,7 @@ export default function GiftPage() {
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pauseStartTimeRef = useRef<number | null>(null);
+  const donationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -421,7 +422,7 @@ export default function GiftPage() {
     }, 1000);
 
     // Use currentDuration for timer
-    const timer = setTimeout(() => {
+    donationTimerRef.current = setTimeout(() => {
       setMediaUrl(null);
       setMediaType(null);
       setStartTime(0);
@@ -436,10 +437,14 @@ export default function GiftPage() {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
+      donationTimerRef.current = null;
     }, currentDuration);
 
     return () => {
-      clearTimeout(timer);
+      if (donationTimerRef.current) {
+        clearTimeout(donationTimerRef.current);
+        donationTimerRef.current = null;
+      }
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
@@ -474,11 +479,56 @@ export default function GiftPage() {
       };
 
       const handleEnded = () => {
-        // Video ends - just pause it, don't close content
-        // Content will stay until donation duration is finished
-        video.pause();
-        // Prevent video from restarting
-        video.currentTime = video.duration;
+        // Get current donation duration
+        const currentDonationDuration = totalDuration > 0 
+          ? totalDuration 
+          : (donationMessage ? calculateDisplayDuration(donationMessage.amount) : 0);
+        
+        // Convert video duration to milliseconds
+        const videoDurationMs = videoDuration > 0 ? videoDuration * 1000 : 0;
+        
+        // If video is shorter than donation duration, close immediately
+        // If video is longer, pause and wait for donation duration
+        if (videoDurationMs > 0 && currentDonationDuration > 0 && videoDurationMs < currentDonationDuration) {
+          console.log("🎬 Video ended early, closing donation:", {
+            videoDuration: videoDurationMs,
+            donationDuration: currentDonationDuration,
+          });
+          
+          // Clear donation timer
+          if (donationTimerRef.current) {
+            clearTimeout(donationTimerRef.current);
+            donationTimerRef.current = null;
+          }
+          
+          // Clear progress interval
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
+          
+          // Video is shorter than donation duration - close immediately
+          setMediaUrl(null);
+          setMediaType(null);
+          setStartTime(0);
+          setDonationMessage(null);
+          setCurrentDonationId(null);
+          setRemainingTime(0);
+          setTotalDuration(0);
+          setVideoDuration(0);
+          setIsVisible(true);
+          pauseStartTimeRef.current = null;
+        } else {
+          // Video is longer than donation duration - just pause it
+          // Content will stay until donation duration is finished
+          console.log("🎬 Video ended but donation duration not reached, pausing:", {
+            videoDuration: videoDurationMs,
+            donationDuration: currentDonationDuration,
+          });
+          video.pause();
+          // Prevent video from restarting
+          video.currentTime = video.duration;
+        }
       };
 
       const handleTimeUpdate = () => {
@@ -504,7 +554,7 @@ export default function GiftPage() {
         video.removeEventListener("timeupdate", handleTimeUpdate);
       };
     }
-  }, [mediaUrl, mediaType]);
+  }, [mediaUrl, mediaType, videoDuration, totalDuration, donationMessage]);
 
   // Load TikTok embed script when TikTok media is shown
   useEffect(() => {
