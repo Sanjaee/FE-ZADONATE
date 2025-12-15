@@ -2,8 +2,6 @@
 
 import Image from "next/image";
 import { Geist, Geist_Mono } from "next/font/google";
-import Navbar from "@/components/general/Navbar";
-
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -93,7 +91,6 @@ export default function Home() {
     <div
       className={`${geistSans.className} ${geistMono.className} flex min-h-screen flex-col bg-zinc-50 font-sans dark:bg-black`}
     >
-      <Navbar />
       <main className="flex min-h-screen w-full max-w-3xl mx-auto flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
         <MediaDisplay
           src="/next.svg"
