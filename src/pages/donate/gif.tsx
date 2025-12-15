@@ -125,6 +125,8 @@ export default function GiftPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pauseStartTimeRef = useRef<number | null>(null);
   const donationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const youtubePlayerRef = useRef<any>(null); // YouTube Player instance
+  const youtubeIframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -556,6 +558,144 @@ export default function GiftPage() {
     }
   }, [mediaUrl, mediaType, videoDuration, totalDuration, donationMessage]);
 
+  // Load YouTube IFrame API and handle YouTube video ended
+  useEffect(() => {
+    if (mediaType === "youtube" && mediaUrl && extractYouTubeId(mediaUrl)) {
+      const videoId = extractYouTubeId(mediaUrl);
+      if (!videoId) return;
+
+      // Load YouTube IFrame API if not already loaded
+      const loadYouTubeAPI = () => {
+        if (window.YT && window.YT.Player) {
+          initializeYouTubePlayer(videoId);
+        } else {
+          // Load YouTube IFrame API script
+          const existingScript = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+          if (!existingScript) {
+            const script = document.createElement("script");
+            script.src = "https://www.youtube.com/iframe_api";
+            script.async = true;
+            window.onYouTubeIframeAPIReady = () => {
+              initializeYouTubePlayer(videoId);
+            };
+            document.body.appendChild(script);
+          } else {
+            // Script already loaded, initialize player
+            setTimeout(() => {
+              initializeYouTubePlayer(videoId);
+            }, 100);
+          }
+        }
+      };
+
+      const initializeYouTubePlayer = (id: string) => {
+        try {
+          // Find the iframe element
+          const iframe = document.querySelector(`iframe[src*="${id}"]`) as HTMLIFrameElement;
+          if (!iframe) {
+            // Wait a bit for iframe to be created
+            setTimeout(() => initializeYouTubePlayer(id), 100);
+            return;
+          }
+          if (!window.YT || !window.YT.Player) {
+            setTimeout(() => initializeYouTubePlayer(id), 100);
+            return;
+          }
+
+          // Create YouTube player instance
+          const player = new window.YT.Player(iframe, {
+            events: {
+              onStateChange: (event: any) => {
+                // YT.PlayerState.ENDED = 0
+                if (event.data === 0) {
+                  console.log("🎬 YouTube video ended");
+                  
+                  // Get current donation duration
+                  const currentDonationDuration = totalDuration > 0 
+                    ? totalDuration 
+                    : (donationMessage ? calculateDisplayDuration(donationMessage.amount) : 0);
+                  
+                  // Get video duration from player
+                  const videoDurationMs = player.getDuration() ? player.getDuration() * 1000 : 0;
+                  
+                  // If video is shorter than donation duration, close immediately
+                  // If video is longer, pause and wait for donation duration
+                  if (videoDurationMs > 0 && currentDonationDuration > 0 && videoDurationMs < currentDonationDuration) {
+                    console.log("🎬 YouTube video ended early, closing donation:", {
+                      videoDuration: videoDurationMs,
+                      donationDuration: currentDonationDuration,
+                    });
+                    
+                    // Clear donation timer
+                    if (donationTimerRef.current) {
+                      clearTimeout(donationTimerRef.current);
+                      donationTimerRef.current = null;
+                    }
+                    
+                    // Clear progress interval
+                    if (progressIntervalRef.current) {
+                      clearInterval(progressIntervalRef.current);
+                      progressIntervalRef.current = null;
+                    }
+                    
+                    // Video is shorter than donation duration - close immediately
+                    setMediaUrl(null);
+                    setMediaType(null);
+                    setStartTime(0);
+                    setDonationMessage(null);
+                    setCurrentDonationId(null);
+                    setRemainingTime(0);
+                    setTotalDuration(0);
+                    setVideoDuration(0);
+                    setIsVisible(true);
+                    pauseStartTimeRef.current = null;
+                    
+                    // Destroy YouTube player
+                    if (youtubePlayerRef.current) {
+                      try {
+                        youtubePlayerRef.current.destroy();
+                      } catch (e) {
+                        console.warn("Error destroying YouTube player:", e);
+                      }
+                      youtubePlayerRef.current = null;
+                    }
+                  } else {
+                    // Video is longer than donation duration - just pause it
+                    console.log("🎬 YouTube video ended but donation duration not reached, pausing:", {
+                      videoDuration: videoDurationMs,
+                      donationDuration: currentDonationDuration,
+                    });
+                    player.pauseVideo();
+                  }
+                }
+              },
+              onReady: (event: any) => {
+                console.log("✅ YouTube player ready");
+                youtubePlayerRef.current = event.target;
+              },
+            },
+          });
+        } catch (error) {
+          console.error("Error initializing YouTube player:", error);
+        }
+      };
+
+      loadYouTubeAPI();
+
+      return () => {
+        // Cleanup YouTube player
+        if (youtubePlayerRef.current) {
+          try {
+            youtubePlayerRef.current.destroy();
+          } catch (e) {
+            console.warn("Error destroying YouTube player on cleanup:", e);
+          }
+          youtubePlayerRef.current = null;
+        }
+      };
+    }
+  }, [mediaType, mediaUrl, totalDuration, donationMessage]);
+
   // Load TikTok embed script when TikTok media is shown
   useEffect(() => {
     if (mediaType === "tiktok" && mediaUrl) {
@@ -642,6 +782,7 @@ export default function GiftPage() {
           )}
           {mediaType === "youtube" && extractYouTubeId(mediaUrl) && (
             <iframe
+              ref={youtubeIframeRef}
               key={`${mediaUrl}-${startTime}`}
               src={`https://www.youtube.com/embed/${extractYouTubeId(mediaUrl)}?autoplay=1&mute=0&controls=0&rel=0&modestbranding=1&playsinline=1&start=${startTime}&enablejsapi=1`}
               className="w-full h-full"
