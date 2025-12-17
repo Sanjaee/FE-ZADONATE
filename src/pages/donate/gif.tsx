@@ -656,10 +656,11 @@ export default function GiftPage() {
                     // Restart video from start time
                     setTimeout(() => {
                       try {
+                        const ytPlayer = player as any; // YouTube Player API type
                         if (startTime > 0) {
-                          player.seekTo(startTime, true);
+                          ytPlayer.seekTo(startTime, true);
                         } else {
-                          player.seekTo(0, true);
+                          ytPlayer.seekTo(0, true);
                         }
                         player.playVideo();
                       } catch (e) {
