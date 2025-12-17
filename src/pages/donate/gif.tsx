@@ -183,6 +183,44 @@ export default function GiftPage() {
                  switch (data.type) {
                    case "donation":
                      if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
+                       // If this is a new donation (different ID), reset previous video
+                       if (currentDonationId && currentDonationId !== data.id) {
+                         console.log("🔄 New donation received, resetting previous video:", {
+                           oldId: currentDonationId,
+                           newId: data.id,
+                         });
+                         
+                         // Stop and reset video if playing
+                         if (videoRef.current) {
+                           try {
+                             videoRef.current.pause();
+                             videoRef.current.currentTime = 0;
+                           } catch (e) {
+                             console.warn("Error resetting video:", e);
+                           }
+                         }
+                         
+                         // Destroy YouTube player if exists
+                         if (youtubePlayerRef.current) {
+                           try {
+                             youtubePlayerRef.current.destroy();
+                           } catch (e) {
+                             console.warn("Error destroying YouTube player:", e);
+                           }
+                           youtubePlayerRef.current = null;
+                         }
+                         
+                         // Clear timers
+                         if (donationTimerRef.current) {
+                           clearTimeout(donationTimerRef.current);
+                           donationTimerRef.current = null;
+                         }
+                         if (progressIntervalRef.current) {
+                           clearInterval(progressIntervalRef.current);
+                           progressIntervalRef.current = null;
+                         }
+                       }
+                       
                        // Validate message max 160 characters
                        const message = data.message && data.message.length > 160 
                          ? data.message.substring(0, 160) 
@@ -224,6 +262,44 @@ export default function GiftPage() {
                    case "text":
                      // Handle text donations (same as donation for gif page)
                      if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
+                       // If this is a new donation (different ID), reset previous video
+                       if (currentDonationId && currentDonationId !== data.id) {
+                         console.log("🔄 New text donation received, resetting previous video:", {
+                           oldId: currentDonationId,
+                           newId: data.id,
+                         });
+                         
+                         // Stop and reset video if playing
+                         if (videoRef.current) {
+                           try {
+                             videoRef.current.pause();
+                             videoRef.current.currentTime = 0;
+                           } catch (e) {
+                             console.warn("Error resetting video:", e);
+                           }
+                         }
+                         
+                         // Destroy YouTube player if exists
+                         if (youtubePlayerRef.current) {
+                           try {
+                             youtubePlayerRef.current.destroy();
+                           } catch (e) {
+                             console.warn("Error destroying YouTube player:", e);
+                           }
+                           youtubePlayerRef.current = null;
+                         }
+                         
+                         // Clear timers
+                         if (donationTimerRef.current) {
+                           clearTimeout(donationTimerRef.current);
+                           donationTimerRef.current = null;
+                         }
+                         if (progressIntervalRef.current) {
+                           clearInterval(progressIntervalRef.current);
+                           progressIntervalRef.current = null;
+                         }
+                       }
+                       
                        // Validate message max 160 characters
                        const message = data.message && data.message.length > 160 
                          ? data.message.substring(0, 160) 
@@ -263,6 +339,34 @@ export default function GiftPage() {
 
               case "media":
                 if (data.mediaUrl && data.id) {
+                  // If this is a new media (different ID), reset previous video
+                  if (currentDonationId && currentDonationId !== data.id) {
+                    console.log("🔄 New media received, resetting previous video:", {
+                      oldId: currentDonationId,
+                      newId: data.id,
+                    });
+                    
+                    // Stop and reset video if playing
+                    if (videoRef.current) {
+                      try {
+                        videoRef.current.pause();
+                        videoRef.current.currentTime = 0;
+                      } catch (e) {
+                        console.warn("Error resetting video:", e);
+                      }
+                    }
+                    
+                    // Destroy YouTube player if exists
+                    if (youtubePlayerRef.current) {
+                      try {
+                        youtubePlayerRef.current.destroy();
+                      } catch (e) {
+                        console.warn("Error destroying YouTube player:", e);
+                      }
+                      youtubePlayerRef.current = null;
+                    }
+                  }
+                  
                   setMediaUrl(data.mediaUrl);
                   setCurrentDonationId(data.id);
                   setIsVisible(true);
@@ -526,43 +630,45 @@ export default function GiftPage() {
         // Convert video duration to milliseconds
         const videoDurationMs = videoDuration > 0 ? videoDuration * 1000 : 0;
         
-        // If video is shorter than donation duration, close immediately
-        // If video is longer, pause and wait for donation duration
-        if (videoDurationMs > 0 && currentDonationDuration > 0 && videoDurationMs < currentDonationDuration) {
-          console.log("🎬 Video ended early, closing donation:", {
-            videoDuration: videoDurationMs,
-            donationDuration: currentDonationDuration,
-          });
-          
-          // Clear donation timer
-          if (donationTimerRef.current) {
-            clearTimeout(donationTimerRef.current);
-            donationTimerRef.current = null;
+        // Check if donation is still active
+        if (donationMessage && remainingTime > 0) {
+          // There's still donation time left - loop the video
+          if (videoDurationMs > 0 && currentDonationDuration > 0 && videoDurationMs < currentDonationDuration) {
+            console.log("🎬 Video ended, looping until donation duration ends:", {
+              videoDuration: videoDurationMs,
+              remainingDonationTime: remainingTime,
+              donationDuration: currentDonationDuration,
+            });
+            
+            // Video is shorter than remaining donation time - loop it
+            // Restart video from beginning
+            setTimeout(() => {
+              try {
+                video.currentTime = 0;
+                video.play();
+              } catch (e) {
+                console.warn("Error looping video:", e);
+              }
+            }, 100);
+          } else {
+            // Video is longer than donation duration - just pause it
+            // Timer will handle closing when donation duration is finished
+            console.log("🎬 Video ended but donation duration not reached, pausing:", {
+              videoDuration: videoDurationMs,
+              donationDuration: currentDonationDuration,
+              remainingTime: remainingTime,
+            });
+            video.pause();
+            // Prevent video from restarting
+            video.currentTime = video.duration;
           }
-          
-          // Clear progress interval
-          if (progressIntervalRef.current) {
-            clearInterval(progressIntervalRef.current);
-            progressIntervalRef.current = null;
-          }
-          
-          // Video is shorter than donation duration - close immediately
-          setMediaUrl(null);
-          setMediaType(null);
-          setStartTime(0);
-          setDonationMessage(null);
-          setCurrentDonationId(null);
-          setRemainingTime(0);
-          setTotalDuration(0);
-          setVideoDuration(0);
-          setIsVisible(true);
-          pauseStartTimeRef.current = null;
         } else {
-          // Video is longer than donation duration - just pause it
-          // Content will stay until donation duration is finished
-          console.log("🎬 Video ended but donation duration not reached, pausing:", {
+          // No donation time left or donation ended - just pause it
+          // Timer will handle closing
+          console.log("🎬 Video ended, pausing (donation time may be up):", {
             videoDuration: videoDurationMs,
-            donationDuration: currentDonationDuration,
+            remainingTime: remainingTime,
+            hasDonation: !!donationMessage,
           });
           video.pause();
           // Prevent video from restarting
@@ -571,10 +677,14 @@ export default function GiftPage() {
       };
 
       const handleTimeUpdate = () => {
-        // Prevent video from looping by resetting to end if it tries to restart
-        if (video.ended && video.currentTime < video.duration) {
-          video.pause();
-          video.currentTime = video.duration;
+        // Only prevent looping if donation has ended
+        // If donation is still active, allow video to loop
+        if (video.ended && (!donationMessage || remainingTime <= 0)) {
+          // Donation ended, prevent video from restarting
+          if (video.currentTime < video.duration) {
+            video.pause();
+            video.currentTime = video.duration;
+          }
         }
       };
 
@@ -593,7 +703,7 @@ export default function GiftPage() {
         video.removeEventListener("timeupdate", handleTimeUpdate);
       };
     }
-  }, [mediaUrl, mediaType, videoDuration, totalDuration, donationMessage]);
+  }, [mediaUrl, mediaType, videoDuration, totalDuration, donationMessage, remainingTime]);
 
   // Load YouTube IFrame API and handle YouTube video ended
   useEffect(() => {
