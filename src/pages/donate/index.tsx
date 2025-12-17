@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import {
   Card,
@@ -36,8 +36,9 @@ interface CreatePaymentRequest {
   startTime?: number;
   message?: string;
   notes?: string;
-  paymentMethod: "bank_transfer" | "gopay" | "credit_card" | "qris";
+  paymentMethod: "bank_transfer" | "gopay" | "credit_card" | "qris" | "crypto";
   bank?: string;
+  currency?: string;
 }
 
 export default function DonatePage() {
@@ -45,6 +46,10 @@ export default function DonatePage() {
   const [loading, setLoading] = useState(false);
   const [showOptional, setShowOptional] = useState(false);
   const [startTimeMinutes, setStartTimeMinutes] = useState<number>(0);
+  const [cryptoCurrencies, setCryptoCurrencies] = useState<any[]>([]);
+  const [loadingCurrencies, setLoadingCurrencies] = useState(false);
+  const [showCryptoDropdown, setShowCryptoDropdown] = useState(false);
+  const [minAmountUsd, setMinAmountUsd] = useState<number>(1.0);
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
     donorEmail: "",
@@ -54,9 +59,40 @@ export default function DonatePage() {
     notes: "",
     paymentMethod: "qris",
     bank: "bca",
+    currency: "",
   });
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+  // Fetch crypto currencies when crypto payment is selected
+  useEffect(() => {
+    if (formData.paymentMethod === "crypto" && cryptoCurrencies.length === 0) {
+      setLoadingCurrencies(true);
+      // Fetch all currencies without sourceCurrency parameter
+      fetch(`${apiBaseUrl}/payment/plisio/currencies`)
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          return res.json();
+        })
+        .then((data) => {
+          if (data.success && data.data) {
+            // Show all currencies (don't filter hidden/maintenance)
+            setCryptoCurrencies(data.data);
+            console.log(`✅ Loaded ${data.data.length} cryptocurrencies`);
+          } else {
+            console.error("Failed to fetch currencies:", data.error);
+          }
+        })
+        .catch((err) => {
+          console.error("Error fetching currencies:", err);
+        })
+        .finally(() => {
+          setLoadingCurrencies(false);
+        });
+    }
+  }, [formData.paymentMethod, apiBaseUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +105,13 @@ export default function DonatePage() {
         startTime: startTimeMinutes > 0 ? startTimeMinutes * 60 : undefined,
       };
 
-      const response = await fetch(`${apiBaseUrl}/payment/create`, {
+      // Determine which endpoint to use
+      const endpoint =
+        formData.paymentMethod === "crypto"
+          ? `${apiBaseUrl}/payment/plisio/create`
+          : `${apiBaseUrl}/payment/create`;
+
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -80,9 +122,26 @@ export default function DonatePage() {
       const data = await response.json();
 
       if (data.success && data.data) {
-        // Redirect to payment detail page using UUID ID or order ID
-        const paymentId = data.data.id || data.data.orderId;
-        router.push(`/donate/${paymentId}`);
+        // For crypto payments, redirect to invoice_url if available
+        if (formData.paymentMethod === "crypto") {
+          const invoiceUrl = data.data.invoiceUrl || data.data.invoice?.invoiceUrl;
+          if (invoiceUrl) {
+            // Redirect directly to Plisio invoice page
+            window.location.href = invoiceUrl;
+            return;
+          }
+        }
+
+        // For other payment methods, redirect to payment detail page
+        const paymentId =
+          data.data.payment?.id ||
+          data.data.id ||
+          data.data.orderId;
+        if (paymentId) {
+          router.push(`/donate/${paymentId}`);
+        } else {
+          alert("Payment created but unable to redirect");
+        }
       } else {
         alert("Failed to create payment: " + (data.error || "Unknown error"));
       }
@@ -135,7 +194,9 @@ export default function DonatePage() {
               {/* Amount */}
               <div className="space-y-2">
                 <Label htmlFor="amount">
-                  Jumlah Donasi (Rp) <span className="text-red-500">*</span>
+                  Jumlah Donasi{" "}
+                  {formData.paymentMethod === "crypto" ? "(USD cents)" : "(Rp)"}{" "}
+                  <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="amount"
@@ -144,28 +205,50 @@ export default function DonatePage() {
                   value={formData.amount || ""}
                   onChange={handleInputChange}
                   required
-                  min="1000"
-                  placeholder="10000"
+                  min={
+                    formData.paymentMethod === "crypto"
+                      ? Math.max(100, Math.ceil(minAmountUsd * 100)).toString()
+                      : "1000"
+                  }
+                  placeholder={
+                    formData.paymentMethod === "crypto"
+                      ? `${Math.max(200, Math.ceil(minAmountUsd * 100))} (for $${Math.max(2.0, minAmountUsd).toFixed(2)})`
+                      : "10000"
+                  }
                 />
-                <div className="flex gap-2 flex-wrap">
-                  {[1000, 10000, 20000, 50000].map((amount) => (
-                    <button
-                      key={amount}
-                      type="button"
-                      onClick={() =>
-                        setFormData((prev) => ({ ...prev, amount }))
-                      }
-                      className={`px-4 py-2 rounded-lg border-2 transition-all text-sm font-semibold ${
-                        formData.amount === amount
-                          ? "border-blue-600 bg-blue-50 text-blue-600"
-                          : "border-gray-200 bg-white hover:border-gray-300 text-gray-700"
-                      }`}
-                    >
-                      Rp {amount.toLocaleString("id-ID")}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-sm text-muted-foreground">Minimum Rp 1.000</p>
+                {formData.paymentMethod !== "crypto" && (
+                  <>
+                    <div className="flex gap-2 flex-wrap">
+                      {[1000, 10000, 20000, 50000].map((amount) => (
+                        <button
+                          key={amount}
+                          type="button"
+                          onClick={() =>
+                            setFormData((prev) => ({ ...prev, amount }))
+                          }
+                          className={`px-4 py-2 rounded-lg border-2 transition-all text-sm font-semibold ${
+                            formData.amount === amount
+                              ? "border-blue-600 bg-blue-50 text-blue-600"
+                              : "border-gray-200 bg-white hover:border-gray-300 text-gray-700"
+                          }`}
+                        >
+                          Rp {amount.toLocaleString("id-ID")}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground">Minimum Rp 1.000</p>
+                  </>
+                )}
+                {formData.paymentMethod === "crypto" && (
+                  <p className="text-sm text-muted-foreground">
+                    Masukkan jumlah dalam USD cents (contoh: 200 = $2.00). Akan dikonversi ke cryptocurrency yang dipilih.
+                    {formData.currency && (
+                      <span className="block mt-1 text-orange-600 font-semibold">
+                        Minimum: ${minAmountUsd.toFixed(2)} USD
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
 
               {/* Donation Type - Toggle Buttons */}
@@ -312,6 +395,40 @@ export default function DonatePage() {
                   Metode Pembayaran <span className="text-red-500">*</span>
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
+                  {/* Crypto Button */}
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "crypto" }))}
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+                      formData.paymentMethod === "crypto"
+                        ? "border-blue-600 bg-blue-50"
+                        : "border-gray-200 bg-white hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-lg flex items-center justify-center">
+                      <svg
+                        className="w-8 h-8 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    </div>
+                    <span
+                      className={`text-sm font-semibold ${
+                        formData.paymentMethod === "crypto" ? "text-blue-600" : "text-gray-700"
+                      }`}
+                    >
+                      Crypto
+                    </span>
+                    <span className="text-xs text-gray-500 mt-1">1%</span>
+                  </button>
                   {/* QRIS Button */}
                   <button
                     type="button"
@@ -471,6 +588,132 @@ export default function DonatePage() {
                         {bank.toUpperCase()}
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Crypto Currency Selection */}
+              {formData.paymentMethod === "crypto" && (
+                <div className="space-y-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="currency">
+                      Pilih Cryptocurrency (Opsional)
+                    </Label>
+                    {loadingCurrencies ? (
+                      <div className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-500">
+                        Memuat cryptocurrency...
+                      </div>
+                    ) : cryptoCurrencies.length === 0 ? (
+                      <div className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-red-500">
+                        Gagal memuat cryptocurrency. Silakan coba lagi.
+                      </div>
+                    ) : (
+                      <div className="relative crypto-dropdown-container">
+                        <button
+                          type="button"
+                          onClick={() => setShowCryptoDropdown(!showCryptoDropdown)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-left flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            {formData.currency ? (
+                              <>
+                                <img
+                                  src={
+                                    cryptoCurrencies.find((c) => c.cid === formData.currency)
+                                      ?.icon || ""
+                                  }
+                                  alt=""
+                                  className="w-6 h-6"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                                <span>
+                                  {
+                                    cryptoCurrencies.find((c) => c.cid === formData.currency)
+                                      ?.name
+                                  }{" "}
+                                  (
+                                  {
+                                    cryptoCurrencies.find((c) => c.cid === formData.currency)
+                                      ?.currency
+                                  }
+                                  )
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-gray-500">
+                                Auto (Plisio akan memilih otomatis)
+                              </span>
+                            )}
+                          </div>
+                          {showCryptoDropdown ? (
+                            <ChevronUp className="w-4 h-4 text-gray-500" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-gray-500" />
+                          )}
+                        </button>
+
+                        {showCryptoDropdown && (
+                          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData((prev) => ({ ...prev, currency: "" }));
+                                setShowCryptoDropdown(false);
+                                setMinAmountUsd(1.0); // Reset to default minimum
+                              }}
+                              className={`w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-2 ${
+                                !formData.currency ? "bg-blue-50 text-blue-600" : ""
+                              }`}
+                            >
+                              <span className="text-gray-500">Auto (Plisio akan memilih otomatis)</span>
+                            </button>
+                            {cryptoCurrencies.map((crypto) => (
+                              <button
+                                key={crypto.cid}
+                                type="button"
+                                onClick={() => {
+                                  setFormData((prev) => ({ ...prev, currency: crypto.cid }));
+                                  setShowCryptoDropdown(false);
+                                  // Calculate minimum USD amount
+                                  if (crypto.min_sum_in && crypto.fiat_rate) {
+                                    const minSumIn = parseFloat(crypto.min_sum_in);
+                                    const fiatRate = parseFloat(crypto.fiat_rate);
+                                    if (!isNaN(minSumIn) && !isNaN(fiatRate) && fiatRate > 0) {
+                                      const minUsd = (minSumIn / fiatRate) * 1.1; // Add 10% buffer
+                                      setMinAmountUsd(minUsd);
+                                    }
+                                  }
+                                }}
+                                className={`w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-2 ${
+                                  formData.currency === crypto.cid
+                                    ? "bg-blue-50 text-blue-600"
+                                    : ""
+                                }`}
+                              >
+                                <img
+                                  src={crypto.icon}
+                                  alt={crypto.name}
+                                  className="w-6 h-6"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                                <span>
+                                  {crypto.name} ({crypto.currency})
+                                  {crypto.hidden ? " [Hidden]" : ""}
+                                  {crypto.maintenance ? " [Maintenance]" : ""}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-sm text-muted-foreground">
+                      Biarkan kosong untuk memilih otomatis, atau pilih cryptocurrency spesifik. Total {cryptoCurrencies.length} cryptocurrency tersedia. Jumlah USD akan dikonversi ke cryptocurrency yang dipilih.
+                    </p>
                   </div>
                 </div>
               )}

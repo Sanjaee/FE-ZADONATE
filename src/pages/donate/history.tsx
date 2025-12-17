@@ -12,6 +12,10 @@ interface DonationHistory {
   amount: number;
   message?: string;
   createdAt: string;
+  payment?: {
+    paymentMethod?: string;
+    paymentType?: string;
+  };
 }
 
 interface HistoryResponse {
@@ -31,6 +35,8 @@ interface WebSocketMessage {
   mediaType?: string;
   startTime?: number;
   createdAt?: string;
+  paymentMethod?: string;
+  paymentType?: string;
 }
 
 export default function HistoryPage() {
@@ -142,6 +148,12 @@ export default function HistoryPage() {
                     mediaType: data.mediaType,
                     startTime: data.startTime,
                     createdAt: data.createdAt || new Date().toISOString(),
+                    payment: data.paymentMethod
+                      ? {
+                          paymentMethod: data.paymentMethod,
+                          paymentType: data.paymentType,
+                        }
+                      : undefined,
                   };
 
                   // Add new history to the beginning of the list (most recent first)
@@ -236,12 +248,38 @@ export default function HistoryPage() {
     return `Rp${amount.toLocaleString("id-ID")}`;
   };
 
-  const getTypeLabel = (type: string): string => {
-    return type === "gif" ? "Media Donation" : "Text Donation";
+  const getTypeLabel = (donation: DonationHistory): string => {
+    const typeLabel = donation.type === "gif" ? "Media" : "Text";
+    const paymentMethod = donation.payment?.paymentMethod;
+    
+    if (paymentMethod === "crypto") {
+      return `${typeLabel} (Crypto)`;
+    } else if (paymentMethod) {
+      // Format payment method: bank_transfer -> Bank Transfer, gopay -> GoPay, etc.
+      const formatted = paymentMethod
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+      return `${typeLabel} (${formatted})`;
+    }
+    return `${typeLabel} Donation`;
   };
 
-  const getTypeColor = (type: string): string => {
-    return type === "gif"
+  const getTypeColor = (donation: DonationHistory): string => {
+    const paymentMethod = donation.payment?.paymentMethod;
+    
+    if (paymentMethod === "crypto") {
+      return donation.type === "gif" ? "bg-yellow-500" : "bg-yellow-600";
+    } else if (paymentMethod === "bank_transfer") {
+      return donation.type === "gif" ? "bg-gray-500" : "bg-gray-600";
+    } else if (paymentMethod === "gopay" || paymentMethod === "qris") {
+      return donation.type === "gif" ? "bg-blue-500" : "bg-blue-600";
+    } else if (paymentMethod === "credit_card") {
+      return donation.type === "gif" ? "bg-purple-500" : "bg-purple-600";
+    }
+    
+    // Default colors
+    return donation.type === "gif"
       ? "bg-blue-500"
       : "bg-green-500";
   };
@@ -293,10 +331,10 @@ export default function HistoryPage() {
                   <div className="flex items-center justify-between mb-4">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold text-white ${getTypeColor(
-                        donation.type
+                        donation
                       )}`}
                     >
-                      {getTypeLabel(donation.type)}
+                      {getTypeLabel(donation)}
                     </span>
                     <span className="text-gray-500 text-xs">
                       {formatDate(donation.createdAt)}

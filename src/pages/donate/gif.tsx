@@ -127,17 +127,6 @@ export default function GiftPage() {
   const donationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const youtubePlayerRef = useRef<any>(null); // YouTube Player instance
   const youtubeIframeRef = useRef<HTMLIFrameElement | null>(null);
-  const donationStateRef = useRef<{
-    donationMessage: typeof donationMessage;
-    totalDuration: number;
-    remainingTime: number;
-    startTime: number;
-  }>({
-    donationMessage: null,
-    totalDuration: 0,
-    remainingTime: 0,
-    startTime: 0,
-  });
 
   // WebSocket connection
   useEffect(() => {
@@ -376,16 +365,6 @@ export default function GiftPage() {
     };
   }, []);
 
-  // Update donation state ref whenever state changes (for YouTube player access)
-  useEffect(() => {
-    donationStateRef.current = {
-      donationMessage,
-      totalDuration,
-      remainingTime,
-      startTime,
-    };
-  }, [donationMessage, totalDuration, remainingTime, startTime]);
-
   // Auto-hide based on donation duration from backend
   // Progress bar always follows donation duration, video stops when finished but content stays
   useEffect(() => {
@@ -428,6 +407,17 @@ export default function GiftPage() {
             clearInterval(progressIntervalRef.current);
             progressIntervalRef.current = null;
           }
+          
+          // Destroy YouTube player before closing if YouTube video is playing
+          if (youtubePlayerRef.current && mediaType === "youtube") {
+            try {
+              youtubePlayerRef.current.destroy();
+            } catch (e) {
+              console.warn("Error destroying YouTube player on progress end:", e);
+            }
+            youtubePlayerRef.current = null;
+          }
+          
           // Close when time is up
           setMediaUrl(null);
           setMediaType(null);
@@ -446,6 +436,16 @@ export default function GiftPage() {
 
     // Use currentDuration for timer
     donationTimerRef.current = setTimeout(() => {
+      // Destroy YouTube player before closing
+      if (youtubePlayerRef.current && mediaType === "youtube") {
+        try {
+          youtubePlayerRef.current.destroy();
+        } catch (e) {
+          console.warn("Error destroying YouTube player on timer end:", e);
+        }
+        youtubePlayerRef.current = null;
+      }
+      
       setMediaUrl(null);
       setMediaType(null);
       setStartTime(0);
@@ -631,43 +631,51 @@ export default function GiftPage() {
                 if (event.data === 0) {
                   console.log("🎬 YouTube video ended");
                   
-                  // Check if donation duration is still remaining using ref (latest state)
-                  setTimeout(() => {
-                    const currentState = donationStateRef.current;
-                    
-                    // Check if donation is still active
-                    if (!currentState.donationMessage || currentState.totalDuration <= 0 || currentState.remainingTime <= 0) {
-                      // Donation closed or duration finished, destroy player
-                      console.log("✅ Donation duration finished, closing YouTube video");
-                      if (youtubePlayerRef.current) {
-                        try {
-                          youtubePlayerRef.current.destroy();
-                        } catch (e) {
-                          console.warn("Error destroying YouTube player:", e);
-                        }
-                        youtubePlayerRef.current = null;
-                      }
-                      return;
-                    }
-
-                    // Donation still active, loop the video
-                    console.log("🔄 Looping YouTube video - donation duration still active", {
-                      remainingTime: currentState.remainingTime,
-                      totalDuration: currentState.totalDuration,
+                  // Get current donation duration
+                  const currentDonationDuration = totalDuration > 0 
+                    ? totalDuration 
+                    : (donationMessage ? calculateDisplayDuration(donationMessage.amount) : 0);
+                  
+                  // Get video duration from player
+                  const videoDurationMs = player.getDuration() ? player.getDuration() * 1000 : 0;
+                  
+                  // Get remaining donation time from state
+                  // We need to check if there's still time left for donation
+                  // If video ended and there's still donation time, loop the video
+                  // If no donation time left, the timer will handle closing
+                  
+                  // Check if donation is still active by checking if donationMessage exists
+                  if (donationMessage && remainingTime > 0) {
+                    // There's still donation time left - loop the video
+                    console.log("🎬 YouTube video ended, looping until donation duration ends:", {
+                      videoDuration: videoDurationMs,
+                      remainingDonationTime: remainingTime,
                     });
                     
-                    try {
-                      // Seek to start time and play again
-                      if (currentState.startTime > 0) {
-                        player.seekTo(currentState.startTime, true);
-                      } else {
-                        player.seekTo(0, true);
+                    // Video is shorter than remaining donation time - loop it
+                    // Restart video from start time
+                    setTimeout(() => {
+                      try {
+                        if (startTime > 0) {
+                          player.seekTo(startTime, true);
+                        } else {
+                          player.seekTo(0, true);
+                        }
+                        player.playVideo();
+                      } catch (e) {
+                        console.warn("Error looping YouTube video:", e);
                       }
-                      player.playVideo();
-                    } catch (e) {
-                      console.error("Error looping YouTube video:", e);
-                    }
-                  }, 100);
+                    }, 100);
+                  } else {
+                    // No donation time left or donation ended - just pause it
+                    // Timer will handle closing
+                    console.log("🎬 YouTube video ended, pausing (donation time may be up):", {
+                      videoDuration: videoDurationMs,
+                      remainingTime: remainingTime,
+                      hasDonation: !!donationMessage,
+                    });
+                    player.pauseVideo();
+                  }
                 }
               },
               onReady: (event: any) => {
