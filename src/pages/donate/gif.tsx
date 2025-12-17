@@ -7,7 +7,7 @@ interface DonationMessage {
   id?: string; // UUID for tracking this donation
   type: string;
   donorName?: string;
-  amount?: number; // Integer amount
+  amount?: number; // Integer amount (in IDR for duration calculation)
   message?: string;
   mediaUrl?: string;
   mediaType?: string;
@@ -15,6 +15,10 @@ interface DonationMessage {
   targetTime?: string | number; // Start time in seconds for YouTube videos (can be string or number)
   duration?: number; // Display duration in milliseconds (from backend)
   visible?: boolean;
+  paymentMethod?: string; // crypto, bank_transfer, gopay, etc
+  paymentType?: string; // plisio, midtrans
+  plisioCurrency?: string; // BTC, ETH, SOL, etc
+  plisioAmount?: string; // Crypto amount (e.g., "0.001", "0.5")
 }
 
 // Helper function to extract YouTube video ID
@@ -111,8 +115,12 @@ export default function GiftPage() {
   const [donationMessage, setDonationMessage] = useState<{
     id: string; // UUID for tracking
     donorName: string;
-    amount: number; // Integer amount
+    amount: number; // Integer amount (in IDR for duration calculation)
     message?: string;
+    paymentMethod?: string;
+    paymentType?: string;
+    plisioCurrency?: string;
+    plisioAmount?: string;
   } | null>(null);
   const [currentDonationId, setCurrentDonationId] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -202,6 +210,10 @@ export default function GiftPage() {
                          donorName: data.donorName,
                          amount: data.amount,
                          message: message,
+                         paymentMethod: data.paymentMethod,
+                         paymentType: data.paymentType,
+                         plisioCurrency: data.plisioCurrency,
+                         plisioAmount: data.plisioAmount,
                        });
                        setCurrentDonationId(data.id);
                        setIsVisible(true);
@@ -238,6 +250,10 @@ export default function GiftPage() {
                          donorName: data.donorName,
                          amount: data.amount,
                          message: message,
+                         paymentMethod: data.paymentMethod,
+                         paymentType: data.paymentType,
+                         plisioCurrency: data.plisioCurrency,
+                         plisioAmount: data.plisioAmount,
                        });
                        setCurrentDonationId(data.id);
                        setIsVisible(true);
@@ -865,9 +881,19 @@ export default function GiftPage() {
                   {donationMessage.donorName}
                 </span>{" "}
                 baru saja memberikan{" "}
-                <span className="text-[#FFB703]">
-                  Rp{donationMessage.amount.toLocaleString("id-ID")}
-                </span>
+                {donationMessage.paymentMethod === "crypto" && donationMessage.plisioCurrency && donationMessage.plisioAmount ? (
+                  <span className="text-[#FFB703]">
+                    {parseFloat(donationMessage.plisioAmount).toLocaleString("id-ID", {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 8,
+                    })}{" "}
+                    {donationMessage.plisioCurrency}
+                  </span>
+                ) : (
+                  <span className="text-[#FFB703]">
+                    Rp{donationMessage.amount.toLocaleString("id-ID")}
+                  </span>
+                )}
               </div>
 
               {/* Line 2: Optional message - moved down */}
