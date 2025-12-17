@@ -41,6 +41,9 @@ interface CreatePaymentRequest {
   currency?: string;
 }
 
+// USD to IDR conversion rate (configurable)
+const USD_TO_IDR_RATE = 16500;
+
 export default function DonatePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -50,6 +53,7 @@ export default function DonatePage() {
   const [loadingCurrencies, setLoadingCurrencies] = useState(false);
   const [showCryptoDropdown, setShowCryptoDropdown] = useState(false);
   const [minAmountUsd, setMinAmountUsd] = useState<number>(1.0);
+  const [usdAmount, setUsdAmount] = useState<string>(""); // For crypto: USD input as string (e.g., "3.12")
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
     donorEmail: "",
@@ -63,6 +67,13 @@ export default function DonatePage() {
   });
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+  // Reset USD amount when switching payment method
+  useEffect(() => {
+    if (formData.paymentMethod !== "crypto") {
+      setUsdAmount("");
+    }
+  }, [formData.paymentMethod]);
 
   // Fetch crypto currencies when crypto payment is selected
   useEffect(() => {
@@ -157,10 +168,51 @@ export default function DonatePage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: name === "amount" ? parseInt(value) || 0 : value,
-    }));
+    
+    // Handle amount input differently for crypto vs non-crypto
+    if (name === "amount") {
+      if (formData.paymentMethod === "crypto") {
+        // For crypto: accept USD with decimal (e.g., "3.12")
+        // Allow numbers and one decimal point
+        const validUsdInput = value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+        setUsdAmount(validUsdInput);
+        
+        // Convert USD to cents for backend
+        const usdValue = parseFloat(validUsdInput) || 0;
+        const amountInCents = Math.round(usdValue * 100);
+        setFormData((prev) => ({
+          ...prev,
+          amount: amountInCents,
+        }));
+      } else {
+        // For non-crypto: integer rupiah
+        setFormData((prev) => ({
+          ...prev,
+          [name]: parseInt(value) || 0,
+        }));
+      }
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
+  };
+  
+  // Calculate IDR equivalent for crypto donations (for duration calculation)
+  const getAmountInIdr = (): number => {
+    if (formData.paymentMethod === "crypto") {
+      const usdValue = parseFloat(usdAmount) || 0;
+      return Math.round(usdValue * USD_TO_IDR_RATE);
+    }
+    return formData.amount;
+  };
+  
+  // Calculate duration in milliseconds based on IDR amount
+  const calculateDuration = (amountIdr: number): number => {
+    // 1000 IDR = 10 seconds, so amount / 1000 * 10 * 1000 ms
+    const durationMs = (amountIdr / 1000) * 10 * 1000;
+    return Math.max(10000, durationMs); // Minimum 10 seconds
   };
 
   return (
@@ -195,24 +247,29 @@ export default function DonatePage() {
               <div className="space-y-2">
                 <Label htmlFor="amount">
                   Jumlah Donasi{" "}
-                  {formData.paymentMethod === "crypto" ? "(USD cents)" : "(Rp)"}{" "}
+                  {formData.paymentMethod === "crypto" ? "(USD)" : "(Rp)"}{" "}
                   <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="amount"
                   name="amount"
-                  type="number"
-                  value={formData.amount || ""}
+                  type={formData.paymentMethod === "crypto" ? "text" : "number"}
+                  step={formData.paymentMethod === "crypto" ? "0.01" : "1"}
+                  value={
+                    formData.paymentMethod === "crypto"
+                      ? usdAmount
+                      : formData.amount || ""
+                  }
                   onChange={handleInputChange}
                   required
                   min={
                     formData.paymentMethod === "crypto"
-                      ? Math.max(100, Math.ceil(minAmountUsd * 100)).toString()
+                      ? minAmountUsd.toString()
                       : "1000"
                   }
                   placeholder={
                     formData.paymentMethod === "crypto"
-                      ? `${Math.max(200, Math.ceil(minAmountUsd * 100))} (for $${Math.max(2.0, minAmountUsd).toFixed(2)})`
+                      ? `3.12 (minimum $${minAmountUsd.toFixed(2)})`
                       : "10000"
                   }
                 />
@@ -240,14 +297,33 @@ export default function DonatePage() {
                   </>
                 )}
                 {formData.paymentMethod === "crypto" && (
-                  <p className="text-sm text-muted-foreground">
-                    Masukkan jumlah dalam USD cents (contoh: 200 = $2.00). Akan dikonversi ke cryptocurrency yang dipilih.
-                    {formData.currency && (
-                      <span className="block mt-1 text-orange-600 font-semibold">
-                        Minimum: ${minAmountUsd.toFixed(2)} USD
-                      </span>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">
+                      Masukkan jumlah dalam USD (contoh: 3.12 untuk $3.12). Akan dikonversi ke cryptocurrency yang dipilih.
+                      {formData.currency && (
+                        <span className="block mt-1 text-orange-600 font-semibold">
+                          Minimum: ${minAmountUsd.toFixed(2)} USD
+                        </span>
+                      )}
+                    </p>
+                    {usdAmount && parseFloat(usdAmount) > 0 && (
+                      <div className="p-2 bg-blue-50 rounded-lg text-sm">
+                        <p className="text-gray-700">
+                          <span className="font-semibold">Konversi:</span> ${parseFloat(usdAmount).toFixed(2)} USD
+                          {" ≈ "}
+                          <span className="font-semibold text-blue-600">
+                            Rp {getAmountInIdr().toLocaleString("id-ID")}
+                          </span>
+                        </p>
+                        <p className="text-gray-600 mt-1">
+                          Durasi tampil:{" "}
+                          <span className="font-semibold">
+                            {(calculateDuration(getAmountInIdr()) / 1000).toFixed(0)} detik
+                          </span>
+                        </p>
+                      </div>
                     )}
-                  </p>
+                  </div>
                 )}
               </div>
 
