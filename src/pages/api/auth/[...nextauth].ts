@@ -24,22 +24,13 @@ export const authOptions: NextAuthOptions = {
           // Call backend login API
           // Use BACKEND_URL for server-side (NextAuth runs on server), NEXT_PUBLIC_API_URL as fallback
           const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-          
-          // Validate backend URL
-          if (!backendUrl || backendUrl === "http://localhost:5000") {
-            const errorMsg = "BACKEND_URL environment variable is not configured. Please set it in Vercel environment variables.";
-            console.error("🔐", errorMsg);
-            throw new Error(errorMsg);
-          }
-          
           const loginUrl = `${backendUrl}/api/v1/auth/login`;
           
           console.log("🔐 Attempting login to:", loginUrl);
           console.log("🔐 Backend URL env:", {
-            BACKEND_URL: process.env.BACKEND_URL ? "set" : "not set",
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? "set" : "not set",
+            BACKEND_URL: process.env.BACKEND_URL ? `set (${process.env.BACKEND_URL.substring(0, 20)}...)` : "not set",
+            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? `set (${process.env.NEXT_PUBLIC_API_URL.substring(0, 20)}...)` : "not set",
             NODE_ENV: process.env.NODE_ENV,
-            backendUrl: backendUrl.substring(0, 50) + "...",
           });
           
           let response: Response;
@@ -67,32 +58,14 @@ export const authOptions: NextAuthOptions = {
           }
           
           console.log("🔐 Login response status:", response.status, response.statusText);
+          console.log("🔐 Login response headers:", Object.fromEntries(response.headers.entries()));
           
           // Get response text first to check content type
           const responseText = await response.text();
           const contentType = response.headers.get("content-type") || "";
           
           console.log("🔐 Response content-type:", contentType);
-          console.log("🔐 Response text length:", responseText.length);
-          console.log("🔐 Response text preview (first 500 chars):", responseText.substring(0, 500));
-          
-          // Check if response is HTML (error page) or plain text error
-          const trimmedResponse = responseText.trim();
-          const isHTML = contentType.includes("text/html") || 
-                        trimmedResponse.startsWith("<!DOCTYPE") || 
-                        trimmedResponse.startsWith("<html") ||
-                        trimmedResponse.startsWith("<HTML");
-          const isPlainTextError = trimmedResponse.startsWith("Internal Server Error") ||
-                                  trimmedResponse.startsWith("INTERNAL SERVER ERROR") ||
-                                  trimmedResponse.startsWith("Error") ||
-                                  (contentType.includes("text/plain") && !contentType.includes("json"));
-          
-          if (isHTML || isPlainTextError) {
-            console.error("🔐 Backend returned non-JSON response (HTML or plain text error)");
-            console.error("🔐 Content-Type:", contentType);
-            console.error("🔐 Response preview:", trimmedResponse.substring(0, 500));
-            throw new Error(`Backend returned error page instead of JSON (${response.status}). This usually means: 1) Backend URL is incorrect (current: ${backendUrl}), 2) Backend is not accessible from Vercel, or 3) Backend has an internal error. Please check BACKEND_URL environment variable and ensure backend is running and accessible.`);
-          }
+          console.log("🔐 Response text preview:", responseText.substring(0, 200));
           
           if (!response.ok) {
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -104,26 +77,16 @@ export const authOptions: NextAuthOptions = {
                 errorMessage = errorData.error || errorMessage;
               } catch (e) {
                 console.error("🔐 Failed to parse error JSON:", e);
-                console.error("🔐 Error response text:", responseText);
-                errorMessage = `Backend returned non-JSON error. Status: ${response.status}. Response: ${responseText.substring(0, 200)}`;
+                errorMessage = `Backend returned non-JSON error. Status: ${response.status}`;
               }
             } else {
-              // If not JSON, it's probably HTML error page or plain text
-              console.error("🔐 Backend returned non-JSON response");
-              console.error("🔐 Response text:", responseText);
-              errorMessage = `Backend error (${response.status}). Response: ${responseText.substring(0, 200)}. Please check backend URL configuration: ${backendUrl}`;
+              // If not JSON, it's probably HTML error page
+              console.error("🔐 Backend returned non-JSON response (likely HTML error page)");
+              errorMessage = `Backend error (${response.status}). Please check backend URL configuration.`;
             }
             
             console.error("🔐 Login failed:", errorMessage);
             throw new Error(errorMessage);
-          }
-
-          // Validate content type before parsing
-          if (!contentType.includes("application/json")) {
-            console.error("🔐 Backend returned non-JSON response for successful request");
-            console.error("🔐 Content-Type:", contentType);
-            console.error("🔐 Response text:", responseText);
-            throw new Error(`Backend returned non-JSON response. Content-Type: ${contentType}. Please check backend configuration.`);
           }
 
           // Parse JSON response
@@ -133,78 +96,39 @@ export const authOptions: NextAuthOptions = {
           } catch (e) {
             console.error("🔐 Failed to parse response JSON:", e);
             console.error("🔐 Response text:", responseText);
-            console.error("🔐 Response length:", responseText.length);
-            throw new Error(`Backend returned invalid JSON response. Error: ${e instanceof Error ? e.message : "Unknown error"}. Response preview: ${responseText.substring(0, 200)}`);
+            throw new Error("Backend returned invalid JSON response. Please check backend configuration.");
           }
 
           if (!authResponse.success) {
             throw new Error(authResponse.error || "Login failed");
           }
 
-          // Validate required fields
-          if (!authResponse.user) {
-            console.error("🔐 Missing user object in response:", authResponse);
-            throw new Error("Invalid response format: missing user object");
-          }
-
-          if (!authResponse.access_token) {
-            console.error("🔐 Missing access_token in response:", authResponse);
-            throw new Error("Invalid response format: missing access_token");
-          }
-
-          if (!authResponse.user.id) {
-            console.error("🔐 Missing user.id in response:", authResponse);
-            throw new Error("Invalid response format: missing user.id");
-          }
-
-          console.log("🔐 Login successful, user:", {
+          return {
             id: authResponse.user.id,
             email: authResponse.user.email,
-            userType: authResponse.user.user_type,
-          });
-
-          return {
-            id: authResponse.user.id || "",
-            email: authResponse.user.email || credentials.email,
-            name: authResponse.user.full_name || "Admin",
+            name: authResponse.user.full_name,
             image: "",
             accessToken: authResponse.access_token,
-            refreshToken: authResponse.refresh_token || authResponse.access_token + "_refresh",
-            isVerified: authResponse.user.is_verified !== undefined ? authResponse.user.is_verified : true,
-            userType: authResponse.user.user_type || "admin",
-            loginType: authResponse.user.login_type || "credential",
+            refreshToken: authResponse.refresh_token,
+            isVerified: authResponse.user.is_verified,
+            userType: authResponse.user.user_type,
+            loginType: authResponse.user.login_type,
           };
         } catch (error) {
           console.error("🔐 Authentication error:", error);
-          console.error("🔐 Error type:", typeof error);
           console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
           
-          // NextAuth expects authorize to return null on failure, not throw
-          // But we can throw to pass error message to NextAuth
           if (error instanceof Error) {
             // Return more user-friendly error message
             let errorMessage = error.message || "Login failed. Please check your credentials and backend configuration.";
             
             // Provide more specific error messages
             if (errorMessage.includes("Cannot connect to backend") || errorMessage.includes("Network error")) {
-              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables.`;
+              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables. Current URL: ${process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "not set"}`;
             }
             
-            // Ensure error message is a simple string (no complex objects)
-            errorMessage = String(errorMessage).substring(0, 500); // Limit length
-            
-            // Log the error message that will be shown to user
-            console.error("🔐 Throwing error with message:", errorMessage);
-            
-            // Throw error - NextAuth will catch this and return it in result.error
-            // Use CredentialsSignin error type for better handling
-            const authError = new Error(errorMessage);
-            authError.name = "CredentialsSignin";
-            throw authError;
+            throw new Error(errorMessage);
           }
-          
-          // If error is not an Error instance, return null
-          console.error("🔐 Unknown error type, returning null");
           return null;
         }
       },
@@ -215,39 +139,23 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
     async jwt({ token, user }) {
-      try {
-        // Initial sign in
-        if (user) {
-          console.log("🔐 JWT callback - new user:", {
-            id: user.id,
-            email: user.email,
-            hasAccessToken: !!user.accessToken,
-          });
-          return {
-            ...token,
-            sub: user.id || token.sub,
-            accessToken: user.accessToken || token.accessToken,
-            refreshToken: user.refreshToken || token.refreshToken,
-            isVerified: user.isVerified !== undefined ? user.isVerified : token.isVerified,
-            userType: user.userType || token.userType,
-            loginType: user.loginType || token.loginType,
-            image: user.image || token.image,
-          };
-        }
-        return token;
-      } catch (error) {
-        console.error("🔐 JWT callback error:", error);
-        return token;
+      // Initial sign in
+      if (user) {
+        return {
+          ...token,
+          sub: user.id,
+          accessToken: user.accessToken,
+          refreshToken: user.refreshToken,
+          isVerified: user.isVerified,
+          userType: user.userType,
+          loginType: user.loginType,
+          image: user.image,
+        };
       }
+      return token;
     },
     async session({ session, token }) {
       try {
-        console.log("🔐 Session callback called:", {
-          hasToken: !!token,
-          hasAccessToken: !!token.accessToken,
-          tokenSub: token.sub,
-        });
-        
         if (session.user) {
           session.user.id = (token.sub as string) || "";
           // Prioritize token.image over session.user.image
@@ -261,19 +169,10 @@ export const authOptions: NextAuthOptions = {
         session.isVerified = (token.isVerified as boolean) || false;
         session.userType = (token.userType as string) || "";
         session.loginType = (token.loginType as string) || "";
-        
-        console.log("🔐 Session callback success:", {
-          userId: session.user?.id,
-          email: session.user?.email,
-          hasAccessToken: !!session.accessToken,
-        });
-        
         return session;
       } catch (error) {
-        console.error("🔐 Session callback error:", error);
-        console.error("🔐 Session callback error stack:", error instanceof Error ? error.stack : "No stack");
-        // Don't throw, return session with available data
-        return session;
+        console.error("Session callback error:", error);
+        throw error;
       }
     },
     async redirect({ url, baseUrl }) {
