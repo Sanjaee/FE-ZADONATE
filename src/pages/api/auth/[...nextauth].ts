@@ -103,16 +103,38 @@ export const authOptions: NextAuthOptions = {
             throw new Error(authResponse.error || "Login failed");
           }
 
-          return {
+          // Validate required fields
+          if (!authResponse.user) {
+            console.error("🔐 Missing user object in response:", authResponse);
+            throw new Error("Invalid response format: missing user object");
+          }
+
+          if (!authResponse.access_token) {
+            console.error("🔐 Missing access_token in response:", authResponse);
+            throw new Error("Invalid response format: missing access_token");
+          }
+
+          if (!authResponse.user.id) {
+            console.error("🔐 Missing user.id in response:", authResponse);
+            throw new Error("Invalid response format: missing user.id");
+          }
+
+          console.log("🔐 Login successful, user:", {
             id: authResponse.user.id,
             email: authResponse.user.email,
-            name: authResponse.user.full_name,
+            userType: authResponse.user.user_type,
+          });
+
+          return {
+            id: authResponse.user.id || "",
+            email: authResponse.user.email || credentials.email,
+            name: authResponse.user.full_name || "Admin",
             image: "",
             accessToken: authResponse.access_token,
-            refreshToken: authResponse.refresh_token,
-            isVerified: authResponse.user.is_verified,
-            userType: authResponse.user.user_type,
-            loginType: authResponse.user.login_type,
+            refreshToken: authResponse.refresh_token || authResponse.access_token + "_refresh",
+            isVerified: authResponse.user.is_verified !== undefined ? authResponse.user.is_verified : true,
+            userType: authResponse.user.user_type || "admin",
+            loginType: authResponse.user.login_type || "credential",
           };
         } catch (error) {
           console.error("🔐 Authentication error:", error);
@@ -139,23 +161,39 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
     async jwt({ token, user }) {
-      // Initial sign in
-      if (user) {
-        return {
-          ...token,
-          sub: user.id,
-          accessToken: user.accessToken,
-          refreshToken: user.refreshToken,
-          isVerified: user.isVerified,
-          userType: user.userType,
-          loginType: user.loginType,
-          image: user.image,
-        };
+      try {
+        // Initial sign in
+        if (user) {
+          console.log("🔐 JWT callback - new user:", {
+            id: user.id,
+            email: user.email,
+            hasAccessToken: !!user.accessToken,
+          });
+          return {
+            ...token,
+            sub: user.id || token.sub,
+            accessToken: user.accessToken || token.accessToken,
+            refreshToken: user.refreshToken || token.refreshToken,
+            isVerified: user.isVerified !== undefined ? user.isVerified : token.isVerified,
+            userType: user.userType || token.userType,
+            loginType: user.loginType || token.loginType,
+            image: user.image || token.image,
+          };
+        }
+        return token;
+      } catch (error) {
+        console.error("🔐 JWT callback error:", error);
+        return token;
       }
-      return token;
     },
     async session({ session, token }) {
       try {
+        console.log("🔐 Session callback called:", {
+          hasToken: !!token,
+          hasAccessToken: !!token.accessToken,
+          tokenSub: token.sub,
+        });
+        
         if (session.user) {
           session.user.id = (token.sub as string) || "";
           // Prioritize token.image over session.user.image
@@ -169,10 +207,19 @@ export const authOptions: NextAuthOptions = {
         session.isVerified = (token.isVerified as boolean) || false;
         session.userType = (token.userType as string) || "";
         session.loginType = (token.loginType as string) || "";
+        
+        console.log("🔐 Session callback success:", {
+          userId: session.user?.id,
+          email: session.user?.email,
+          hasAccessToken: !!session.accessToken,
+        });
+        
         return session;
       } catch (error) {
-        console.error("Session callback error:", error);
-        throw error;
+        console.error("🔐 Session callback error:", error);
+        console.error("🔐 Session callback error stack:", error instanceof Error ? error.stack : "No stack");
+        // Don't throw, return session with available data
+        return session;
       }
     },
     async redirect({ url, baseUrl }) {
