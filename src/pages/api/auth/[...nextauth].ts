@@ -22,11 +22,16 @@ export const authOptions: NextAuthOptions = {
           }
 
           // Call backend login API
-          // Use NEXT_PUBLIC_API_URL for client-side, or BACKEND_URL for server-side
-          const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || "http://localhost:5000";
+          // Use BACKEND_URL for server-side (NextAuth runs on server), NEXT_PUBLIC_API_URL as fallback
+          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
           const loginUrl = `${backendUrl}/api/v1/auth/login`;
           
           console.log("🔐 Attempting login to:", loginUrl);
+          console.log("🔐 Backend URL env:", {
+            BACKEND_URL: process.env.BACKEND_URL ? "set" : "not set",
+            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? "set" : "not set",
+            NODE_ENV: process.env.NODE_ENV,
+          });
           
           const response = await fetch(loginUrl, {
             method: "POST",
@@ -40,21 +45,46 @@ export const authOptions: NextAuthOptions = {
           });
           
           console.log("🔐 Login response status:", response.status, response.statusText);
+          console.log("🔐 Login response headers:", Object.fromEntries(response.headers.entries()));
+          
+          // Get response text first to check content type
+          const responseText = await response.text();
+          const contentType = response.headers.get("content-type") || "";
+          
+          console.log("🔐 Response content-type:", contentType);
+          console.log("🔐 Response text preview:", responseText.substring(0, 200));
           
           if (!response.ok) {
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            try {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorMessage;
-            } catch {
-              const text = await response.text().catch(() => "");
-              console.error("🔐 Login error response:", text);
+            
+            // Try to parse as JSON if content-type indicates JSON
+            if (contentType.includes("application/json")) {
+              try {
+                const errorData = JSON.parse(responseText);
+                errorMessage = errorData.error || errorMessage;
+              } catch (e) {
+                console.error("🔐 Failed to parse error JSON:", e);
+                errorMessage = `Backend returned non-JSON error. Status: ${response.status}`;
+              }
+            } else {
+              // If not JSON, it's probably HTML error page
+              console.error("🔐 Backend returned non-JSON response (likely HTML error page)");
+              errorMessage = `Backend error (${response.status}). Please check backend URL configuration.`;
             }
+            
             console.error("🔐 Login failed:", errorMessage);
             throw new Error(errorMessage);
           }
 
-          const authResponse = await response.json();
+          // Parse JSON response
+          let authResponse;
+          try {
+            authResponse = JSON.parse(responseText);
+          } catch (e) {
+            console.error("🔐 Failed to parse response JSON:", e);
+            console.error("🔐 Response text:", responseText);
+            throw new Error("Backend returned invalid JSON response. Please check backend configuration.");
+          }
 
           if (!authResponse.success) {
             throw new Error(authResponse.error || "Login failed");
@@ -74,7 +104,8 @@ export const authOptions: NextAuthOptions = {
         } catch (error) {
           console.error("Authentication error:", error);
           if (error instanceof Error) {
-            throw error;
+            // Return more user-friendly error message
+            throw new Error(error.message || "Login failed. Please check your credentials and backend configuration.");
           }
           return null;
         }

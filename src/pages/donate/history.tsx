@@ -4,6 +4,14 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface DonationHistory {
   id: string;
@@ -54,6 +62,7 @@ export default function HistoryPage() {
   const [clearingQueue, setClearingQueue] = useState<boolean>(false);
   const [clearQueueMessage, setClearQueueMessage] = useState<string | null>(null);
   const [showClearQueueDialog, setShowClearQueueDialog] = useState<boolean>(false);
+  const [timeFilter, setTimeFilter] = useState<string>("all"); // "all", "1min", "1hour", "1day", "1week"
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -324,6 +333,40 @@ export default function HistoryPage() {
     return `Rp${amount.toLocaleString("id-ID")}`;
   };
 
+  // Filter history based on time filter
+  const getFilteredHistory = (): DonationHistory[] => {
+    if (timeFilter === "all") {
+      return history;
+    }
+
+    const now = new Date();
+    let filterDate: Date;
+
+    switch (timeFilter) {
+      case "1min":
+        filterDate = new Date(now.getTime() - 1 * 60 * 1000); // 1 minute ago
+        break;
+      case "1hour":
+        filterDate = new Date(now.getTime() - 1 * 60 * 60 * 1000); // 1 hour ago
+        break;
+      case "1day":
+        filterDate = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 1 day ago
+        break;
+      case "1week":
+        filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 1 week ago
+        break;
+      default:
+        return history;
+    }
+
+    return history.filter((donation) => {
+      const donationDate = new Date(donation.createdAt);
+      return donationDate >= filterDate;
+    });
+  };
+
+  const filteredHistory = getFilteredHistory();
+
   const getTypeColor = (donation: DonationHistory): string => {
     const paymentMethod = donation.payment?.paymentMethod;
     
@@ -399,15 +442,36 @@ export default function HistoryPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">Donation History</h1>
-            <p className="text-sm text-gray-500 mt-1">{history.length} donations</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {filteredHistory.length} {filteredHistory.length === 1 ? "donation" : "donations"}
+              {timeFilter !== "all" && ` (filtered from ${history.length} total)`}
+            </p>
           </div>
-          <button
-            onClick={handleClearQueueClick}
-            disabled={clearingQueue}
-            className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Clear Queue
-          </button>
+          <div className="flex flex-row items-center gap-3">
+            {/* Time Filter Select - Shadcn */}
+            <Select value={timeFilter} onValueChange={setTimeFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter waktu" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Waktu</SelectItem>
+                <SelectItem value="1min">1 Menit yang Lalu</SelectItem>
+                <SelectItem value="1hour">1 Jam yang Lalu</SelectItem>
+                <SelectItem value="1day">1 Hari yang Lalu</SelectItem>
+                <SelectItem value="1week">1 Minggu yang Lalu</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {/* Clear Queue Button - Shadcn Red/Destructive */}
+            <Button
+              onClick={handleClearQueueClick}
+              disabled={clearingQueue}
+              variant="destructive"
+              size="default"
+            >
+              {clearingQueue ? "Clearing..." : "Clear Queue"}
+            </Button>
+          </div>
         </div>
 
         {/* Success/Error Messages */}
@@ -422,16 +486,20 @@ export default function HistoryPage() {
           </div>
         )}
 
-        {history.length === 0 ? (
+        {filteredHistory.length === 0 ? (
           <div className="flex justify-center items-center h-64">
             <div className="text-center">
-              <p className="text-gray-400 text-sm">No donation history found</p>
+              <p className="text-gray-400 text-sm">
+                {history.length === 0 
+                  ? "No donation history found" 
+                  : `No donations found in the selected time period`}
+              </p>
             </div>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {history.map((donation) => (
+              {filteredHistory.map((donation) => (
                 <div
                   key={donation.id}
                   className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all duration-200"
