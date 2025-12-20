@@ -896,13 +896,13 @@ export default function DonatePage() {
           </div>
 
           <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-            <AlertDialogCancel className="w-full sm:w-auto">
+            <AlertDialogCancel className="w-full sm:w-auto py-5 mb-2">
               Batal
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmPayment}
               disabled={loading}
-              className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white"
+              className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white py-6"
             >
               {loading ? "Memproses..." : "Konfirmasi & Bayar"}
             </AlertDialogAction>

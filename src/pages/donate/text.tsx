@@ -44,6 +44,13 @@ export default function TextPage() {
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pauseStartTimeRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const textStateRef = useRef<{
+    textMessage: typeof textMessage;
+    remainingTime: number;
+  }>({
+    textMessage: null,
+    remainingTime: 0,
+  });
 
   // WebSocket connection
   useEffect(() => {
@@ -90,6 +97,24 @@ export default function TextPage() {
                 const data: TextMessage = JSON.parse(trimmed);
 
                 if (data.type === "text" && data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
+                  // Check if current donation is still active (has remaining time)
+                  // If there's an ongoing donation (regardless of donor name), ignore new donation
+                  // This ensures donations queue properly and don't interrupt each other
+                  const currentState = textStateRef.current;
+                  if (currentState.textMessage && currentState.remainingTime > 0) {
+                    const isSameDonor = currentState.textMessage.donorName === data.donorName;
+                    console.log("⏸️ New text donation received but current donation still active, ignoring:", {
+                      currentId: currentDonationId,
+                      currentDonor: currentState.textMessage.donorName,
+                      newId: data.id,
+                      newDonor: data.donorName,
+                      isSameDonor: isSameDonor,
+                      remainingTime: currentState.remainingTime,
+                    });
+                    // Don't process new donation until current one finishes (queue will handle it)
+                    return;
+                  }
+                  
                   // Validate message max 250 characters (only for text donations)
                   // Handle undefined, null, or empty string
                   let message = data.message || "";
@@ -244,6 +269,14 @@ export default function TextPage() {
       }
     };
   }, []);
+
+  // Update text state ref whenever state changes
+  useEffect(() => {
+    textStateRef.current = {
+      textMessage,
+      remainingTime,
+    };
+  }, [textMessage, remainingTime]);
 
   // Initialize audio element
   useEffect(() => {

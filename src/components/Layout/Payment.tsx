@@ -697,7 +697,7 @@ export default function PaymentDetailPage() {
             </div>
 
             {/* Payment Details Card */}
-            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4 mt-4">
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
                   <span className="text-sm text-gray-500">Tanggal</span>

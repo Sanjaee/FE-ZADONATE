@@ -194,21 +194,27 @@ export default function GiftPage() {
                  switch (data.type) {
                    case "donation":
                      if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
-                       // Only reset if this is a new donation AND current donation has finished
-                       // Don't interrupt ongoing donation - let it finish first
+                       // Check if current donation is still active (has remaining time)
+                       const currentState = donationStateRef.current;
+                       
+                       // If there's an ongoing donation (regardless of donor name), ignore new donation
+                       // This ensures donations queue properly and don't interrupt each other
+                       if (currentState.donationMessage && currentState.remainingTime > 0) {
+                         const isSameDonor = currentState.donationMessage.donorName === data.donorName;
+                         console.log("⏸️ New donation received but current donation still active, ignoring:", {
+                           currentId: currentDonationId,
+                           currentDonor: currentState.donationMessage.donorName,
+                           newId: data.id,
+                           newDonor: data.donorName,
+                           isSameDonor: isSameDonor,
+                           remainingTime: currentState.remainingTime,
+                         });
+                         // Don't process new donation until current one finishes (queue will handle it)
+                         return;
+                       }
+                       
+                       // Only reset if current donation has finished
                        if (currentDonationId && currentDonationId !== data.id) {
-                         // Check if current donation is still active (has remaining time)
-                         const currentState = donationStateRef.current;
-                         if (currentState.donationMessage && currentState.remainingTime > 0) {
-                           console.log("⏸️ New donation received but current donation still active, ignoring:", {
-                             currentId: currentDonationId,
-                             newId: data.id,
-                             remainingTime: currentState.remainingTime,
-                           });
-                           // Don't process new donation until current one finishes
-                           return;
-                         }
-                         
                          // Current donation finished, safe to reset
                          console.log("🔄 New donation received, resetting previous video:", {
                            oldId: currentDonationId,
@@ -286,21 +292,24 @@ export default function GiftPage() {
 
               case "media":
                 if (data.mediaUrl && data.id) {
-                  // Only reset if this is a new media AND current donation has finished
-                  // Don't interrupt ongoing donation - let it finish first
+                  // Check if current donation is still active (has remaining time)
+                  const currentState = donationStateRef.current;
+                  
+                  // If there's an ongoing donation (regardless of donor name), ignore new media
+                  // This ensures donations queue properly and don't interrupt each other
+                  if (currentState.donationMessage && currentState.remainingTime > 0) {
+                    console.log("⏸️ New media received but current donation still active, ignoring:", {
+                      currentId: currentDonationId,
+                      currentDonor: currentState.donationMessage.donorName,
+                      newId: data.id,
+                      remainingTime: currentState.remainingTime,
+                    });
+                    // Don't process new media until current donation finishes (queue will handle it)
+                    return;
+                  }
+                  
+                  // Only reset if current donation has finished
                   if (currentDonationId && currentDonationId !== data.id) {
-                    // Check if current donation is still active (has remaining time)
-                    const currentState = donationStateRef.current;
-                    if (currentState.donationMessage && currentState.remainingTime > 0) {
-                      console.log("⏸️ New media received but current donation still active, ignoring:", {
-                        currentId: currentDonationId,
-                        newId: data.id,
-                        remainingTime: currentState.remainingTime,
-                      });
-                      // Don't process new media until current donation finishes
-                      return;
-                    }
-                    
                     // Current donation finished, safe to reset
                     console.log("🔄 New media received, resetting previous video:", {
                       oldId: currentDonationId,
