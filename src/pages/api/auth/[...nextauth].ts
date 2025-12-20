@@ -51,10 +51,14 @@ export const authOptions: NextAuthOptions = {
             
             // Check if it's a network error
             if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
-              throw new Error(`Cannot connect to backend at ${backendUrl}. Please check BACKEND_URL environment variable.`);
+              console.error(`🔐 Cannot connect to backend at ${backendUrl}. Please check BACKEND_URL environment variable.`);
+              // Return null instead of throwing to prevent 500 error
+              return null;
             }
             
-            throw new Error(`Network error: ${errorMessage}. Please check backend URL configuration.`);
+            console.error(`🔐 Network error: ${errorMessage}. Please check backend URL configuration.`);
+            // Return null instead of throwing to prevent 500 error
+            return null;
           }
           
           console.log("🔐 Login response status:", response.status, response.statusText);
@@ -122,7 +126,9 @@ export const authOptions: NextAuthOptions = {
           }
 
           if (!authResponse.success) {
-            throw new Error(authResponse.error || "Login failed");
+            console.error("🔐 Login failed - backend returned success: false", authResponse.error || "Login failed");
+            // Return null instead of throwing to prevent 500 error
+            return null;
           }
 
           // Validate required fields
@@ -132,7 +138,8 @@ export const authOptions: NextAuthOptions = {
               hasUserId: !!authResponse.user?.id,
               hasAccessToken: !!authResponse.access_token,
             });
-            throw new Error("Invalid response format from backend: missing required fields");
+            // Return null instead of throwing to prevent 500 error
+            return null;
           }
 
           const userData = {
@@ -199,20 +206,26 @@ export const authOptions: NextAuthOptions = {
       }
     },
     async jwt({ token, user }) {
-      // Initial sign in
-      if (user) {
-        return {
-          ...token,
-          sub: user.id,
-          accessToken: user.accessToken,
-          refreshToken: user.refreshToken,
-          isVerified: user.isVerified,
-          userType: user.userType,
-          loginType: user.loginType,
-          image: user.image,
-        };
+      try {
+        // Initial sign in
+        if (user) {
+          return {
+            ...token,
+            sub: user.id,
+            accessToken: user.accessToken,
+            refreshToken: user.refreshToken,
+            isVerified: user.isVerified,
+            userType: user.userType,
+            loginType: user.loginType,
+            image: user.image,
+          };
+        }
+        return token;
+      } catch (error) {
+        console.error("🔐 JWT callback error:", error);
+        // Return token even if there's an error to prevent 500
+        return token;
       }
-      return token;
     },
     async session({ session, token }) {
       try {
@@ -260,6 +273,26 @@ export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV === "development",
   // Ensure NEXTAUTH_URL is set for production
   ...(process.env.NEXTAUTH_URL && { url: process.env.NEXTAUTH_URL }),
+  events: {
+    async signIn({ user, account }) {
+      console.log("🔐 SignIn event triggered:", { userId: user?.id, provider: account?.provider });
+    },
+    async signOut() {
+      console.log("🔐 SignOut event triggered");
+    },
+    async createUser({ user }) {
+      console.log("🔐 CreateUser event triggered:", { userId: user.id });
+    },
+    async updateUser({ user }) {
+      console.log("🔐 UpdateUser event triggered:", { userId: user.id });
+    },
+    async linkAccount({ user }) {
+      console.log("🔐 LinkAccount event triggered:", { userId: user.id });
+    },
+    async session() {
+      console.log("🔐 Session event triggered");
+    },
+  },
 };
 
 
