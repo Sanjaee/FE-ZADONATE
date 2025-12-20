@@ -58,14 +58,25 @@ export const authOptions: NextAuthOptions = {
           }
           
           console.log("🔐 Login response status:", response.status, response.statusText);
-          console.log("🔐 Login response headers:", Object.fromEntries(response.headers.entries()));
           
           // Get response text first to check content type
           const responseText = await response.text();
           const contentType = response.headers.get("content-type") || "";
           
           console.log("🔐 Response content-type:", contentType);
-          console.log("🔐 Response text preview:", responseText.substring(0, 200));
+          console.log("🔐 Response text preview:", responseText.substring(0, 300));
+          
+          // Check if response is HTML error page (starts with "Internal Server Error" or HTML tags)
+          const trimmedResponse = responseText.trim();
+          if (trimmedResponse.startsWith("Internal Server Error") || 
+              trimmedResponse.startsWith("<!DOCTYPE") || 
+              trimmedResponse.startsWith("<html") ||
+              contentType.includes("text/html")) {
+            console.error("🔐 Backend returned HTML error page instead of JSON");
+            console.error("🔐 Full response:", responseText.substring(0, 500));
+            // Return null instead of throwing to prevent 500 error
+            return null;
+          }
           
           if (!response.ok) {
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -80,13 +91,23 @@ export const authOptions: NextAuthOptions = {
                 errorMessage = `Backend returned non-JSON error. Status: ${response.status}`;
               }
             } else {
-              // If not JSON, it's probably HTML error page
-              console.error("🔐 Backend returned non-JSON response (likely HTML error page)");
+              // If not JSON, it's probably HTML error page or plain text
+              console.error("🔐 Backend returned non-JSON response");
               errorMessage = `Backend error (${response.status}). Please check backend URL configuration.`;
             }
             
             console.error("🔐 Login failed:", errorMessage);
-            throw new Error(errorMessage);
+            // Return null instead of throwing to prevent 500 error
+            return null;
+          }
+
+          // Validate content type before parsing
+          if (!contentType.includes("application/json")) {
+            console.error("🔐 Backend returned non-JSON response for successful request");
+            console.error("🔐 Content-Type:", contentType);
+            console.error("🔐 Response text:", responseText.substring(0, 300));
+            // Return null instead of throwing
+            return null;
           }
 
           // Parse JSON response
@@ -96,7 +117,8 @@ export const authOptions: NextAuthOptions = {
           } catch (e) {
             console.error("🔐 Failed to parse response JSON:", e);
             console.error("🔐 Response text:", responseText);
-            throw new Error("Backend returned invalid JSON response. Please check backend configuration.");
+            // Return null instead of throwing
+            return null;
           }
 
           if (!authResponse.success) {
@@ -136,17 +158,21 @@ export const authOptions: NextAuthOptions = {
           console.error("🔐 Authentication error:", error);
           console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
           
+          // Don't throw error - return null to let NextAuth handle it gracefully
+          // Throwing error causes "Callback for provider type credentials not supported"
           if (error instanceof Error) {
-            // Return more user-friendly error message
+            // Log the error for debugging
             let errorMessage = error.message || "Login failed. Please check your credentials and backend configuration.";
             
             // Provide more specific error messages
             if (errorMessage.includes("Cannot connect to backend") || errorMessage.includes("Network error")) {
-              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables. Current URL: ${process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "not set"}`;
+              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables.`;
             }
             
-            throw new Error(errorMessage);
+            console.error("🔐 Returning null due to error:", errorMessage);
           }
+          
+          // Return null instead of throwing - this allows NextAuth to return proper error
           return null;
         }
       },
@@ -156,9 +182,14 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, account }) {
       try {
         // For credentials provider, always allow sign in if user object exists
-        if (account?.provider === "credentials" && user) {
-          console.log("🔐 SignIn callback - credentials provider, user exists");
-          return true;
+        if (account?.provider === "credentials") {
+          if (user) {
+            console.log("🔐 SignIn callback - credentials provider, user exists");
+            return true;
+          }
+          // If no user, deny sign in
+          console.log("🔐 SignIn callback - credentials provider, no user object");
+          return false;
         }
         // For other providers, allow sign in
         return true;
