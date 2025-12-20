@@ -28,21 +28,34 @@ export const authOptions: NextAuthOptions = {
           
           console.log("🔐 Attempting login to:", loginUrl);
           console.log("🔐 Backend URL env:", {
-            BACKEND_URL: process.env.BACKEND_URL ? "set" : "not set",
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? "set" : "not set",
+            BACKEND_URL: process.env.BACKEND_URL ? `set (${process.env.BACKEND_URL.substring(0, 20)}...)` : "not set",
+            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? `set (${process.env.NEXT_PUBLIC_API_URL.substring(0, 20)}...)` : "not set",
             NODE_ENV: process.env.NODE_ENV,
           });
           
-          const response = await fetch(loginUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              email: credentials.email,
-              password: credentials.password,
-            }),
-          });
+          let response: Response;
+          try {
+            response = await fetch(loginUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                email: credentials.email,
+                password: credentials.password,
+              }),
+            });
+          } catch (fetchError) {
+            console.error("🔐 Fetch error:", fetchError);
+            const errorMessage = fetchError instanceof Error ? fetchError.message : "Unknown fetch error";
+            
+            // Check if it's a network error
+            if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
+              throw new Error(`Cannot connect to backend at ${backendUrl}. Please check BACKEND_URL environment variable.`);
+            }
+            
+            throw new Error(`Network error: ${errorMessage}. Please check backend URL configuration.`);
+          }
           
           console.log("🔐 Login response status:", response.status, response.statusText);
           console.log("🔐 Login response headers:", Object.fromEntries(response.headers.entries()));
@@ -102,10 +115,19 @@ export const authOptions: NextAuthOptions = {
             loginType: authResponse.user.login_type,
           };
         } catch (error) {
-          console.error("Authentication error:", error);
+          console.error("🔐 Authentication error:", error);
+          console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
+          
           if (error instanceof Error) {
             // Return more user-friendly error message
-            throw new Error(error.message || "Login failed. Please check your credentials and backend configuration.");
+            let errorMessage = error.message || "Login failed. Please check your credentials and backend configuration.";
+            
+            // Provide more specific error messages
+            if (errorMessage.includes("Cannot connect to backend") || errorMessage.includes("Network error")) {
+              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables. Current URL: ${process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "not set"}`;
+            }
+            
+            throw new Error(errorMessage);
           }
           return null;
         }
