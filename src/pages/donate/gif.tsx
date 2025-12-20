@@ -292,6 +292,9 @@ export default function GiftPage() {
 
               case "media":
                 if (data.mediaUrl && data.id) {
+                  const newMediaUrl = data.mediaUrl;
+                  const newDonationId = data.id;
+                  
                   // Check if current donation is still active (has remaining time)
                   const currentState = donationStateRef.current;
                   
@@ -301,19 +304,47 @@ export default function GiftPage() {
                     console.log("⏸️ New media received but current donation still active, ignoring:", {
                       currentId: currentDonationId,
                       currentDonor: currentState.donationMessage.donorName,
-                      newId: data.id,
+                      newId: newDonationId,
                       remainingTime: currentState.remainingTime,
                     });
                     // Don't process new media until current donation finishes (queue will handle it)
                     return;
                   }
                   
-                  // Only reset if current donation has finished
-                  if (currentDonationId && currentDonationId !== data.id) {
+                  // Always reset media when new donation arrives (even if same URL)
+                  // This ensures video restarts from beginning for each donation in queue
+                  if (currentDonationId && currentDonationId !== newDonationId) {
                     // Current donation finished, safe to reset
                     console.log("🔄 New media received, resetting previous video:", {
                       oldId: currentDonationId,
-                      newId: data.id,
+                      newId: newDonationId,
+                      sameUrl: mediaUrl === newMediaUrl,
+                    });
+                    
+                    // Stop and reset video if playing
+                    if (videoRef.current) {
+                      try {
+                        videoRef.current.pause();
+                        videoRef.current.currentTime = 0;
+                      } catch (e) {
+                        console.warn("Error resetting video:", e);
+                      }
+                    }
+                    
+                    // Destroy YouTube player if exists
+                    if (youtubePlayerRef.current) {
+                      try {
+                        youtubePlayerRef.current.destroy();
+                      } catch (e) {
+                        console.warn("Error destroying YouTube player:", e);
+                      }
+                      youtubePlayerRef.current = null;
+                    }
+                  } else if (currentDonationId === newDonationId && mediaUrl === newMediaUrl) {
+                    // Same donation ID but media URL is the same - reset to ensure video restarts
+                    console.log("🔄 Same donation ID with same media URL, resetting video to restart:", {
+                      donationId: newDonationId,
+                      mediaUrl: newMediaUrl,
                     });
                     
                     // Stop and reset video if playing
@@ -337,10 +368,6 @@ export default function GiftPage() {
                     }
                   }
                   
-                  setMediaUrl(data.mediaUrl);
-                  setCurrentDonationId(data.id);
-                  setIsVisible(true);
-                  pauseStartTimeRef.current = null;
                   // Set start time for YouTube videos - prioritize targetTime over startTime
                   let parsedStartTime = 0;
                   if (data.targetTime !== undefined) {
@@ -357,17 +384,32 @@ export default function GiftPage() {
                     // Fallback to legacy startTime
                     parsedStartTime = data.startTime;
                   }
-                  setStartTime(parsedStartTime);
+                  
                   // Auto-detect platform or use provided mediaType
-                  if (isYouTubeUrl(data.mediaUrl)) {
-                    setMediaType("youtube");
-                  } else if (isInstagramUrl(data.mediaUrl)) {
-                    setMediaType("instagram");
-                  } else if (isTikTokUrl(data.mediaUrl)) {
-                    setMediaType("tiktok");
+                  let detectedMediaType: "image" | "video" | "youtube" | "instagram" | "tiktok" = "image";
+                  if (isYouTubeUrl(newMediaUrl)) {
+                    detectedMediaType = "youtube";
+                  } else if (isInstagramUrl(newMediaUrl)) {
+                    detectedMediaType = "instagram";
+                  } else if (isTikTokUrl(newMediaUrl)) {
+                    detectedMediaType = "tiktok";
                   } else {
-                    setMediaType((data.mediaType as "image" | "video" | "youtube" | "instagram" | "tiktok") || "image");
+                    detectedMediaType = (data.mediaType as "image" | "video" | "youtube" | "instagram" | "tiktok") || "image";
                   }
+                  
+                  // Always set new media URL and donation ID to trigger re-render with new key
+                  // This ensures React creates new element even if URL is the same
+                  // Clear first to force re-render, then set new values
+                  setMediaUrl(null);
+                  setMediaType(null);
+                  setTimeout(() => {
+                    setMediaUrl(newMediaUrl);
+                    setCurrentDonationId(newDonationId);
+                    setStartTime(parsedStartTime);
+                    setMediaType(detectedMediaType);
+                  }, 0);
+                  setIsVisible(true);
+                  pauseStartTimeRef.current = null;
                 }
                 break;
 
@@ -866,9 +908,10 @@ export default function GiftPage() {
     <div className="flex flex-col w-full h-screen bg-black overflow-hidden">
       {/* Media Section - Top */}
       {mediaUrl && (
-        <div className="flex-1 w-full relative min-h-0">
+        <div className="flex-1 w-full relative min-h-0" key={currentDonationId || mediaUrl}>
           {mediaType === "image" && (
             <Image
+              key={`image-${currentDonationId || mediaUrl}`}
               src={mediaUrl}
               alt="Background"
               fill
@@ -879,6 +922,7 @@ export default function GiftPage() {
           )}
           {mediaType === "video" && (
             <video
+              key={`video-${currentDonationId || mediaUrl}`}
               ref={videoRef}
               src={mediaUrl}
               autoPlay
@@ -890,7 +934,7 @@ export default function GiftPage() {
           {mediaType === "youtube" && extractYouTubeId(mediaUrl) && (
             <iframe
               ref={youtubeIframeRef}
-              key={`${mediaUrl}-${startTime}`}
+              key={`youtube-${currentDonationId || mediaUrl}-${startTime}`}
               src={`https://www.youtube.com/embed/${extractYouTubeId(mediaUrl)}?autoplay=1&mute=0&controls=0&rel=0&modestbranding=1&playsinline=1&start=${startTime}&enablejsapi=1`}
               className="w-full h-full"
               allow="autoplay; encrypted-media; picture-in-picture"
@@ -908,6 +952,7 @@ export default function GiftPage() {
             
             return (
               <iframe
+                key={`instagram-${currentDonationId || mediaUrl}`}
                 src={embedUrl}
                 className="w-full h-full"
                 allow="encrypted-media; autoplay; fullscreen"
@@ -919,7 +964,7 @@ export default function GiftPage() {
             );
           })()}
           {mediaType === "tiktok" && mediaUrl && extractTikTokId(mediaUrl) && (
-            <div className="w-full h-full flex items-center justify-center bg-black">
+            <div key={`tiktok-${currentDonationId || mediaUrl}`} className="w-full h-full flex items-center justify-center bg-black">
               <blockquote
                 className="tiktok-embed"
                 cite={mediaUrl}
