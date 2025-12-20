@@ -23,14 +23,15 @@ export const authOptions: NextAuthOptions = {
 
           // Call backend login API
           // Use BACKEND_URL for server-side (NextAuth runs on server), NEXT_PUBLIC_API_URL as fallback
-          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "https://api.zascript.com";
           const loginUrl = `${backendUrl}/api/v1/auth/login`;
           
           console.log("🔐 Attempting login to:", loginUrl);
           console.log("🔐 Backend URL env:", {
-            BACKEND_URL: process.env.BACKEND_URL ? `set (${process.env.BACKEND_URL.substring(0, 20)}...)` : "not set",
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? `set (${process.env.NEXT_PUBLIC_API_URL.substring(0, 20)}...)` : "not set",
+            BACKEND_URL: process.env.BACKEND_URL || "not set",
+            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "not set",
             NODE_ENV: process.env.NODE_ENV,
+            FINAL_BACKEND_URL: backendUrl,
           });
           
           let response: Response;
