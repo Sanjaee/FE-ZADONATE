@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface DonationHistory {
   id: string;
@@ -46,6 +47,9 @@ export default function HistoryPage() {
   const [limit] = useState<number>(50);
   const [offset, setOffset] = useState<number>(0);
   const [hasMore, setHasMore] = useState<boolean>(true);
+  const [clearingQueue, setClearingQueue] = useState<boolean>(false);
+  const [clearQueueMessage, setClearQueueMessage] = useState<string | null>(null);
+  const [showClearQueueDialog, setShowClearQueueDialog] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -232,6 +236,51 @@ export default function HistoryPage() {
     }
   };
 
+  const handleClearQueueClick = () => {
+    setShowClearQueueDialog(true);
+  };
+
+  const clearQueue = async () => {
+    setShowClearQueueDialog(false);
+    
+    try {
+      setClearingQueue(true);
+      setClearQueueMessage(null);
+      setError(null);
+
+      const response = await fetch(`${apiBaseUrl}/hit/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to clear queue: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setClearQueueMessage("Queue cleared successfully");
+        // Clear message after 3 seconds
+        setTimeout(() => {
+          setClearQueueMessage(null);
+        }, 3000);
+      } else {
+        throw new Error(data.error || "Failed to clear queue");
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      setError(errorMessage);
+      setClearQueueMessage(null);
+      console.error("Error clearing queue:", err);
+    } finally {
+      setClearingQueue(false);
+    }
+  };
+
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleString("id-ID", {
@@ -246,23 +295,6 @@ export default function HistoryPage() {
 
   const formatAmount = (amount: number): string => {
     return `Rp${amount.toLocaleString("id-ID")}`;
-  };
-
-  const getTypeLabel = (donation: DonationHistory): string => {
-    const typeLabel = donation.type === "gif" ? "Media" : "Text";
-    const paymentMethod = donation.payment?.paymentMethod;
-    
-    if (paymentMethod === "crypto") {
-      return `${typeLabel} (Crypto)`;
-    } else if (paymentMethod) {
-      // Format payment method: bank_transfer -> Bank Transfer, gopay -> GoPay, etc.
-      const formatted = paymentMethod
-        .split("_")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ");
-      return `${typeLabel} (${formatted})`;
-    }
-    return `${typeLabel} Donation`;
   };
 
   const getTypeColor = (donation: DonationHistory): string => {
@@ -311,79 +343,112 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-black mb-8">Donation History</h1>
+    <div className="min-h-screen bg-white py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">Donation History</h1>
+            <p className="text-sm text-gray-500 mt-1">{history.length} donations</p>
+          </div>
+          <button
+            onClick={handleClearQueueClick}
+            disabled={clearingQueue}
+            className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Clear Queue
+          </button>
+        </div>
+
+        {/* Success/Error Messages */}
+        {clearQueueMessage && (
+          <div className="mb-4 p-3 bg-green-50 text-green-700 text-sm rounded-md border border-green-100">
+            {clearQueueMessage}
+          </div>
+        )}
+        {error && history.length === 0 && (
+          <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-100">
+            Error: {error}
+          </div>
+        )}
 
         {history.length === 0 ? (
           <div className="flex justify-center items-center h-64">
-            <div className="text-gray-500 text-lg">No donation history found</div>
+            <div className="text-center">
+              <p className="text-gray-400 text-sm">No donation history found</p>
+            </div>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {history.map((donation) => (
                 <div
                   key={donation.id}
-                  className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 hover:shadow-md transition-shadow"
+                  className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all duration-200"
                 >
-                  {/* Header with type badge */}
-                  <div className="flex items-center justify-between mb-4">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-3">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold text-white ${getTypeColor(
-                        donation
-                      )}`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        donation.type === "gif" 
+                          ? "bg-blue-50 text-blue-700" 
+                          : "bg-green-50 text-green-700"
+                      }`}
                     >
-                      {getTypeLabel(donation)}
+                      {donation.type === "gif" ? "GIF" : "TEXT"}
                     </span>
-                    <span className="text-gray-500 text-xs">
-                      {formatDate(donation.createdAt)}
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(
+                        donation
+                      )} text-white`}
+                    >
+                      {donation.payment?.paymentMethod === "crypto" 
+                        ? "Crypto" 
+                        : donation.payment?.paymentMethod 
+                          ? donation.payment.paymentMethod.split("_").map((word) => 
+                              word.charAt(0).toUpperCase() + word.slice(1)
+                            ).join(" ")
+                          : "Payment"}
                     </span>
                   </div>
-
+                  
                   {/* Donor Name */}
-                  <div className="mb-3">
-                    <h3 className="text-xl font-bold text-black">
-                      {donation.donorName}
-                    </h3>
-                  </div>
-
+                  <h3 className="text-base font-semibold text-gray-900 mb-2 truncate">
+                    {donation.donorName}
+                  </h3>
+                  
                   {/* Amount */}
-                  <div className="mb-4">
-                    <p className="text-2xl font-semibold text-black">
-                      {formatAmount(donation.amount)}
-                    </p>
-                  </div>
+                  <p className="text-lg font-bold text-gray-900 mb-3">
+                    {formatAmount(donation.amount)}
+                  </p>
 
-                  {/* Message (if exists) */}
+                  {/* Message */}
                   {donation.message && donation.message.trim().length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-gray-700 text-sm line-clamp-3">
-                        {donation.message}
-                      </p>
+                    <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                      {donation.message}
+                    </p>
+                  )}
+
+                  {/* Media URL (for GIF) */}
+                  {donation.type === "gif" && donation.mediaUrl && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <a
+                        href={donation.mediaUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:text-blue-700 hover:underline truncate block"
+                        title={donation.mediaUrl}
+                      >
+                        {donation.mediaUrl.length > 40 
+                          ? `${donation.mediaUrl.substring(0, 40)}...` 
+                          : donation.mediaUrl}
+                      </a>
                     </div>
                   )}
 
-                  {/* Media Info (for GIF donations, no video display) */}
-                  {donation.type === "gif" && donation.mediaType && (
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <div className="flex items-center gap-2 text-gray-600 text-sm">
-                        <span className="font-semibold">Media Type:</span>
-                        <span className="capitalize">{donation.mediaType}</span>
-                      </div>
-                      {donation.startTime !== undefined && donation.startTime > 0 && (
-                        <div className="flex items-center gap-2 text-gray-600 text-sm mt-1">
-                          <span className="font-semibold">Start Time:</span>
-                          <span>{Math.floor(donation.startTime / 60)}:{(donation.startTime % 60).toString().padStart(2, "0")}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ID (small, for reference) */}
-                  <div className="mt-4 pt-4 border-t border-gray-200">
-                    <p className="text-gray-400 text-xs font-mono truncate">
-                      ID: {donation.id}
+                  {/* Date */}
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <p className="text-xs text-gray-500">
+                      {formatDate(donation.createdAt)}
                     </p>
                   </div>
                 </div>
@@ -396,7 +461,7 @@ export default function HistoryPage() {
                 <button
                   onClick={loadMore}
                   disabled={loading}
-                  className="px-6 py-3 bg-black text-white font-semibold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-6 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? "Loading..." : "Load More"}
                 </button>
@@ -404,13 +469,26 @@ export default function HistoryPage() {
             )}
 
             {!hasMore && history.length > 0 && (
-              <div className="mt-8 text-center text-gray-500">
+              <div className="mt-8 text-center text-gray-400 text-xs">
                 No more donations to load
               </div>
             )}
           </>
         )}
       </div>
+
+      {/* Clear Queue Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showClearQueueDialog}
+        onClose={() => setShowClearQueueDialog(false)}
+        onConfirm={clearQueue}
+        title="Clear Queue"
+        description="Are you sure you want to clear all queues and reset state? This action cannot be undone."
+        confirmText="Clear Queue"
+        cancelText="Cancel"
+        variant="destructive"
+        isLoading={clearingQueue}
+      />
     </div>
   );
 }
