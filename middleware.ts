@@ -5,14 +5,14 @@ import { getToken } from "next-auth/jwt";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Routes that require authentication
-  const protectedRoutes = ["/profile", "/settings", "/post", "/update"];
+  // Routes that require authentication (admin routes)
+  const protectedRoutes = ["/donate/history", "/donate/gif", "/donate/text", "/donate", "/history"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
 
   // Routes that should redirect if already authenticated
-  const authRoutes = ["/auth/login", "/auth/register"];
+  const authRoutes = ["/auth/login"];
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
 
   if (isProtectedRoute) {
@@ -21,10 +21,17 @@ export async function middleware(request: NextRequest) {
       secret: process.env.NEXTAUTH_SECRET,
     });
 
+    // If no session, redirect to login
     if (!token) {
       const url = new URL("/auth/login", request.url);
-      url.searchParams.set("callbackUrl", encodeURIComponent(request.url));
+      url.searchParams.set("callbackUrl", encodeURIComponent(pathname));
       return NextResponse.redirect(url);
+    }
+
+    // Check if user is admin
+    if (token.userType !== "admin" && token.role !== "admin") {
+      // Redirect non-admin to home page
+      return NextResponse.redirect(new URL("/", request.url));
     }
   }
 
@@ -35,7 +42,7 @@ export async function middleware(request: NextRequest) {
     });
 
     if (token) {
-      return NextResponse.redirect(new URL("/", request.url));
+      return NextResponse.redirect(new URL("/donate/history", request.url));
     }
   }
 
