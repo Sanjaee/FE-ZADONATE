@@ -1,6 +1,11 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
+// Validate required environment variables
+if (!process.env.NEXTAUTH_SECRET) {
+  console.error("⚠️ NEXTAUTH_SECRET is not set. Please set it in your environment variables.");
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -41,7 +46,7 @@ export const authOptions: NextAuthOptions = {
             try {
               const errorData = await response.json();
               errorMessage = errorData.error || errorMessage;
-            } catch (e) {
+            } catch {
               const text = await response.text().catch(() => "");
               console.error("🔐 Login error response:", text);
             }
@@ -97,20 +102,25 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.sub as string;
-        // Prioritize token.image over session.user.image
-        session.user.image = (token.image as string) || session.user.image || undefined;
-        session.user.name = (token.name as string) || session.user.name || "";
-        session.user.role = token.userType as string; // Add role alias
-        session.user.username = (token.name as string) || session.user.name; // Add username alias
+      try {
+        if (session.user) {
+          session.user.id = (token.sub as string) || "";
+          // Prioritize token.image over session.user.image
+          session.user.image = (token.image as string) || session.user.image || undefined;
+          session.user.name = (token.name as string) || session.user.name || "";
+          session.user.role = (token.userType as string) || ""; // Add role alias
+          session.user.username = (token.name as string) || session.user.name || ""; // Add username alias
+        }
+        session.accessToken = (token.accessToken as string) || "";
+        session.refreshToken = (token.refreshToken as string) || "";
+        session.isVerified = (token.isVerified as boolean) || false;
+        session.userType = (token.userType as string) || "";
+        session.loginType = (token.loginType as string) || "";
+        return session;
+      } catch (error) {
+        console.error("Session callback error:", error);
+        throw error;
       }
-      session.accessToken = token.accessToken as string;
-      session.refreshToken = token.refreshToken as string;
-      session.isVerified = token.isVerified as boolean;
-      session.userType = token.userType as string;
-      session.loginType = token.loginType as string;
-      return session;
     },
     async redirect({ url, baseUrl }) {
       // Allows relative callback URLs
@@ -131,8 +141,10 @@ export const authOptions: NextAuthOptions = {
   jwt: {
     maxAge: 7 * 24 * 60 * 60, // 7 days
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || "fallback-secret-key-change-in-production",
   debug: process.env.NODE_ENV === "development",
+  // Ensure NEXTAUTH_URL is set for production
+  ...(process.env.NEXTAUTH_URL && { url: process.env.NEXTAUTH_URL }),
 };
 
 
