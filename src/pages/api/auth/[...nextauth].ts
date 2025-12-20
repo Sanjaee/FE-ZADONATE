@@ -17,8 +17,13 @@ export const authOptions: NextAuthOptions = {
           }
 
           // Call backend login API
-          const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-          const response = await fetch(`${backendUrl}/api/v1/auth/login`, {
+          // Use NEXT_PUBLIC_API_URL for client-side, or BACKEND_URL for server-side
+          const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || "http://localhost:5000";
+          const loginUrl = `${backendUrl}/api/v1/auth/login`;
+          
+          console.log("🔐 Attempting login to:", loginUrl);
+          
+          const response = await fetch(loginUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -28,10 +33,20 @@ export const authOptions: NextAuthOptions = {
               password: credentials.password,
             }),
           });
-
+          
+          console.log("🔐 Login response status:", response.status, response.statusText);
+          
           if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || "Invalid email or password");
+            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorMessage;
+            } catch (e) {
+              const text = await response.text().catch(() => "");
+              console.error("🔐 Login error response:", text);
+            }
+            console.error("🔐 Login failed:", errorMessage);
+            throw new Error(errorMessage);
           }
 
           const authResponse = await response.json();
