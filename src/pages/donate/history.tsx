@@ -76,6 +76,7 @@ export default function HistoryPage() {
       setLoading(true);
       setError(null);
 
+      // /hit/history is public, no auth required
       const response = await fetch(
         `${apiBaseUrl}/hit/history?limit=${limit}&offset=${currentOffset}`
       );
@@ -264,11 +265,16 @@ export default function HistoryPage() {
       setClearQueueMessage(null);
       setError(null);
 
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (session?.accessToken) {
+        headers["Authorization"] = `Bearer ${session.accessToken}`;
+      }
+
       const response = await fetch(`${apiBaseUrl}/hit/reset`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
       });
 
       if (!response.ok) {
