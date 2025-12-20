@@ -99,6 +99,7 @@ export default function DonatePage() {
   const [showCryptoDialog, setShowCryptoDialog] = useState(false);
   const [minAmountUsd, setMinAmountUsd] = useState<number>(1.0);
   const [usdAmount, setUsdAmount] = useState<string>(""); // For crypto: USD input as string (e.g., "3.12")
+  const [formattedAmount, setFormattedAmount] = useState<string>(""); // For non-crypto: formatted Rupiah with dots (e.g., "50.000")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
@@ -118,8 +119,16 @@ export default function DonatePage() {
   useEffect(() => {
     if (formData.paymentMethod !== "crypto") {
       setUsdAmount("");
+      // Format current amount when switching to non-crypto
+      if (formData.amount > 0) {
+        setFormattedAmount(formData.amount.toLocaleString("id-ID"));
+      } else {
+        setFormattedAmount("");
+      }
+    } else {
+      setFormattedAmount("");
     }
-  }, [formData.paymentMethod]);
+  }, [formData.paymentMethod, formData.amount]);
 
   // Fetch crypto currencies when crypto payment is selected
   useEffect(() => {
@@ -237,10 +246,18 @@ export default function DonatePage() {
           amount: amountInCents,
         }));
       } else {
-        // For non-crypto: integer rupiah
+        // For non-crypto: integer rupiah with formatting
+        // Remove dots and non-numeric characters except numbers
+        const numericValue = value.replace(/[^0-9]/g, "");
+        const parsedAmount = parseInt(numericValue) || 0;
+        
+        // Update formatted display value
+        setFormattedAmount(numericValue ? parsedAmount.toLocaleString("id-ID") : "");
+        
+        // Update actual amount value
         setFormData((prev) => ({
           ...prev,
-          [name]: parseInt(value) || 0,
+          [name]: parsedAmount,
         }));
       }
     } else {
@@ -319,24 +336,18 @@ export default function DonatePage() {
                 <Input
                   id="amount"
                   name="amount"
-                  type={formData.paymentMethod === "crypto" ? "text" : "number"}
-                  step={formData.paymentMethod === "crypto" ? "0.01" : "1"}
+                  type="text"
                   value={
                     formData.paymentMethod === "crypto"
                       ? usdAmount
-                      : formData.amount || ""
+                      : formattedAmount
                   }
                   onChange={handleInputChange}
                   required
-                  min={
-                    formData.paymentMethod === "crypto"
-                      ? minAmountUsd.toString()
-                      : "1000"
-                  }
                   placeholder={
                     formData.paymentMethod === "crypto"
                       ? `3.12 (minimum $${minAmountUsd.toFixed(2)})`
-                      : "10000"
+                      : "50.000"
                   }
                 />
                 {formData.paymentMethod !== "crypto" && (
@@ -346,10 +357,11 @@ export default function DonatePage() {
                         <button
                           key={amount}
                           type="button"
-                          onClick={() =>
-                            setFormData((prev) => ({ ...prev, amount }))
-                          }
-                          className={`px-4 py-2 rounded-lg border-2 transition-all text-sm font-semibold ${
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, amount }));
+                            setFormattedAmount(amount.toLocaleString("id-ID"));
+                          }}
+                          className={`px-4 py-2 rounded-lg border-2 transition-all text-sm font-semibold cursor-pointer ${
                             formData.amount === amount
                               ? "border-blue-600 bg-blue-50 text-blue-600"
                               : "border-gray-200 bg-white hover:border-gray-300 text-gray-700"
@@ -402,20 +414,20 @@ export default function DonatePage() {
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, donationType: "text" }))}
-                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all ${
+                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all cursor-pointer ${
                       formData.donationType === "text"
-                        ? "bg-blue-600 text-white shadow-md"
+                        ? "bg-black text-white shadow-md"
                         : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                     }`}
                   >
-                    Text Only
+                    Text / Alert
                   </button>
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, donationType: "gif" }))}
-                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all ${
+                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all cursor-pointer ${
                       formData.donationType === "gif"
-                        ? "bg-blue-600 text-white shadow-md"
+                        ? "bg-black text-white shadow-md"
                         : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                     }`}
                   >
@@ -491,7 +503,7 @@ export default function DonatePage() {
                 <button
                   type="button"
                   onClick={() => setShowOptional(!showOptional)}
-                  className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                  className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
                 >
                   <span className="text-sm font-medium text-gray-700">
                     Opsi Tambahan {showOptional ? "(Tutup)" : "(Buka)"}
@@ -544,7 +556,7 @@ export default function DonatePage() {
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "crypto" }))}
-                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "crypto"
                         ? "border-blue-600 bg-blue-50"
                         : "border-gray-200 bg-white hover:border-gray-300"
@@ -565,7 +577,7 @@ export default function DonatePage() {
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "qris" }))}
-                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "qris"
                         ? "border-blue-600 bg-blue-50"
                         : "border-gray-200 bg-white hover:border-gray-300"
@@ -589,7 +601,7 @@ export default function DonatePage() {
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "gopay" }))}
-                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "gopay"
                         ? "border-blue-600 bg-blue-50"
                         : "border-gray-200 bg-white hover:border-gray-300"
@@ -615,7 +627,7 @@ export default function DonatePage() {
                     onClick={() =>
                       setFormData((prev) => ({ ...prev, paymentMethod: "bank_transfer" }))
                     }
-                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "bank_transfer"
                         ? "border-blue-600 bg-blue-50"
                         : "border-gray-200 bg-white hover:border-gray-300"
@@ -666,7 +678,7 @@ export default function DonatePage() {
                         key={bank}
                         type="button"
                         onClick={() => setFormData((prev) => ({ ...prev, bank }))}
-                        className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                        className={`px-4 py-2 rounded-lg border-2 transition-all cursor-pointer ${
                           formData.bank === bank
                             ? "border-blue-600 bg-blue-50 text-blue-600 font-semibold"
                             : "border-gray-200 bg-white hover:border-gray-300 text-gray-700"
@@ -699,7 +711,7 @@ export default function DonatePage() {
                         <button
                           type="button"
                           onClick={() => setShowCryptoDialog(true)}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-left flex items-center justify-between hover:bg-gray-50 transition-colors"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-left flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer"
                         >
                           <div className="flex items-center gap-3">
                             {formData.currency ? (
@@ -733,7 +745,7 @@ export default function DonatePage() {
                             ) : (
                               <div className="text-left">
                                 <div className="font-semibold text-gray-900">Auto</div>
-                                <div className="text-sm text-gray-500">Plisio akan memilih otomatis</div>
+                                <div className="text-sm text-gray-500">Pilih Saat Terbuat Invoice</div>
                               </div>
                             )}
                           </div>
@@ -754,7 +766,7 @@ export default function DonatePage() {
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full"
+                className="w-full py-6 cursor-pointer"
                 size="lg"
               >
                 {loading ? "Memproses..." : "Buat Donasi"}
@@ -855,40 +867,32 @@ export default function DonatePage() {
             </div>
 
             {/* Message */}
-            <div className="flex flex-col gap-1 pt-3 border-t border-gray-200">
+            <div className="flex flex-col gap-1 border-gray-200">
               <span className="text-sm text-gray-600">Pesan</span>
               <span className="text-sm font-medium text-gray-900 break-words">
                 {formData.message || "-"}
               </span>
             </div>
 
-            {/* Media URL (if Media donation type) */}
-            {formData.donationType === "gif" && formData.mediaUrl && (
-              <div className="flex flex-col gap-1 pt-3 border-t border-gray-200">
-                <span className="text-sm text-gray-600">Media URL</span>
-                <span className="text-sm font-medium text-gray-900 break-all">
-                  {formData.mediaUrl}
-                </span>
-              </div>
-            )}
-
-            {/* Durasi Tampil - for all payment methods */}
-            <div className="pt-3 border-t border-gray-300">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-700">Durasi Tampil</span>
-                <span className="text-sm font-bold text-blue-600">
-                  {formatDuration(Math.floor(calculateDuration(getAmountInIdr()) / 1000))}
-                </span>
-              </div>
-              {formData.paymentMethod === "crypto" && (
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-xs text-gray-500">Setara dengan</span>
-                  <span className="text-xs text-gray-500">
-                    Rp {getAmountInIdr().toLocaleString("id-ID")}
+            {/* Durasi Tampil - only for GIF donations */}
+            {formData.donationType === "gif" && (
+              <div className="pt-3 border-t border-gray-300">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-semibold text-gray-700">Durasi Tampil</span>
+                  <span className="text-sm font-bold text-blue-600">
+                    {formatDuration(Math.floor(calculateDuration(getAmountInIdr()) / 1000))}
                   </span>
                 </div>
-              )}
-            </div>
+                {formData.paymentMethod === "crypto" && (
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-xs text-gray-500">Setara dengan</span>
+                    <span className="text-xs text-gray-500">
+                      Rp {getAmountInIdr().toLocaleString("id-ID")}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <AlertDialogFooter className="flex-col sm:flex-row gap-2">
@@ -941,7 +945,7 @@ export default function DonatePage() {
                 </div>
                 <div>
                   <div className="font-semibold text-gray-900">Auto</div>
-                  <div className="text-sm text-gray-500">Plisio akan memilih otomatis</div>
+                  <div className="text-sm text-gray-500">Pilih Saat Terbuat Invoice</div>
                 </div>
               </div>
             </button>
