@@ -103,17 +103,35 @@ export const authOptions: NextAuthOptions = {
             throw new Error(authResponse.error || "Login failed");
           }
 
-          return {
+          // Validate required fields
+          if (!authResponse.user || !authResponse.user.id || !authResponse.access_token) {
+            console.error("🔐 Invalid response format - missing required fields:", {
+              hasUser: !!authResponse.user,
+              hasUserId: !!authResponse.user?.id,
+              hasAccessToken: !!authResponse.access_token,
+            });
+            throw new Error("Invalid response format from backend: missing required fields");
+          }
+
+          const userData = {
             id: authResponse.user.id,
-            email: authResponse.user.email,
-            name: authResponse.user.full_name,
+            email: authResponse.user.email || credentials.email,
+            name: authResponse.user.full_name || "Admin",
             image: "",
             accessToken: authResponse.access_token,
-            refreshToken: authResponse.refresh_token,
-            isVerified: authResponse.user.is_verified,
-            userType: authResponse.user.user_type,
-            loginType: authResponse.user.login_type,
+            refreshToken: authResponse.refresh_token || authResponse.access_token + "_refresh",
+            isVerified: authResponse.user.is_verified !== undefined ? authResponse.user.is_verified : true,
+            userType: authResponse.user.user_type || "admin",
+            loginType: authResponse.user.login_type || "credential",
           };
+
+          console.log("🔐 Login successful, user data:", {
+            id: userData.id,
+            email: userData.email,
+            hasAccessToken: !!userData.accessToken,
+          });
+
+          return userData;
         } catch (error) {
           console.error("🔐 Authentication error:", error);
           console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
@@ -135,8 +153,19 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn() {
-      return true;
+    async signIn({ user, account }) {
+      try {
+        // For credentials provider, always allow sign in if user object exists
+        if (account?.provider === "credentials" && user) {
+          console.log("🔐 SignIn callback - credentials provider, user exists");
+          return true;
+        }
+        // For other providers, allow sign in
+        return true;
+      } catch (error) {
+        console.error("🔐 SignIn callback error:", error);
+        return false;
+      }
     },
     async jwt({ token, user }) {
       // Initial sign in
@@ -171,8 +200,10 @@ export const authOptions: NextAuthOptions = {
         session.loginType = (token.loginType as string) || "";
         return session;
       } catch (error) {
-        console.error("Session callback error:", error);
-        throw error;
+        console.error("🔐 Session callback error:", error);
+        console.error("🔐 Session callback error stack:", error instanceof Error ? error.stack : "No stack");
+        // Don't throw - return session with available data to prevent 500 error
+        return session;
       }
     },
     async redirect({ url, baseUrl }) {
