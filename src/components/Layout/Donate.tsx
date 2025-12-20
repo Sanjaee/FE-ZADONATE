@@ -149,7 +149,7 @@ export default function DonatePage() {
           data.data.id ||
           data.data.orderId;
         if (paymentId) {
-          router.push(`/donate/${paymentId}`);
+          router.push(`/${paymentId}`);
         } else {
           alert("Payment created but unable to redirect");
         }

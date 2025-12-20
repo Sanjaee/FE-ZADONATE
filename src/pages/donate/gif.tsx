@@ -646,7 +646,7 @@ export default function GiftPage() {
         // Check if donation duration is still remaining using ref (latest state)
         setTimeout(() => {
           const currentState = donationStateRef.current;
-          
+        
           // Check if donation is still active
           if (!currentState.donationMessage || currentState.totalDuration <= 0 || currentState.remainingTime <= 0) {
             // Donation closed or duration finished, pause video
@@ -678,9 +678,9 @@ export default function GiftPage() {
         if (video.ended && (!donationMessage || remainingTime <= 0)) {
           // Donation ended, prevent video from restarting
           if (video.currentTime < video.duration) {
-            video.pause();
-            video.currentTime = video.duration;
-          }
+          video.pause();
+          video.currentTime = video.duration;
+        }
         }
       };
 
@@ -780,7 +780,7 @@ export default function GiftPage() {
                   // Check if donation duration is still remaining using ref (latest state)
                   setTimeout(() => {
                     const currentState = donationStateRef.current;
-                    
+                  
                     // Check if donation is still active
                     if (!currentState.donationMessage || currentState.totalDuration <= 0 || currentState.remainingTime <= 0) {
                       // Donation closed or duration finished, destroy player
@@ -807,14 +807,14 @@ export default function GiftPage() {
                       // Seek to start time and play again
                       if (currentState.startTime > 0) {
                         ytPlayer.seekTo(currentState.startTime, true);
-                      } else {
+                        } else {
                         ytPlayer.seekTo(0, true);
-                      }
-                      player.playVideo();
-                    } catch (e) {
+                        }
+                        player.playVideo();
+                      } catch (e) {
                       console.error("Error looping YouTube video:", e);
-                    }
-                  }, 100);
+                      }
+                    }, 100);
                 }
               },
               onReady: (event: any) => {
@@ -1012,9 +1012,9 @@ export default function GiftPage() {
                     {donationMessage.plisioCurrency}
                   </span>
                 ) : (
-                  <span className="text-[#FFB703]">
-                    Rp{donationMessage.amount.toLocaleString("id-ID")}
-                  </span>
+                <span className="text-[#FFB703]">
+                  Rp{donationMessage.amount.toLocaleString("id-ID")}
+                </span>
                 )}
               </div>
 

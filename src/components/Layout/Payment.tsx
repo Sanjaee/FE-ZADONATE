@@ -57,10 +57,12 @@ export default function PaymentDetailPage() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+  const isProduction = process.env.NODE_ENV === "production";
 
   const fetchPayment = useCallback(async () => {
     if (!id) return;
@@ -288,6 +290,52 @@ export default function PaymentDetailPage() {
     }
   };
 
+  const copyToClipboard = async (text: string, type: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(type);
+      setTimeout(() => setCopied(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+        setCopied(type);
+        setTimeout(() => setCopied(null), 2000);
+      } catch (fallbackErr) {
+        console.error("Fallback copy failed:", fallbackErr);
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
+  const downloadQRCode = () => {
+    if (!payment?.qrCodeUrl) return;
+    
+    fetch(payment.qrCodeUrl)
+      .then((response) => response.blob())
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `qr-code-${payment.orderId}.png`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      })
+      .catch((err) => {
+        console.error("Failed to download QR code:", err);
+        alert("Gagal mengunduh QR code");
+      });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-white p-8 flex items-center justify-center">
@@ -356,13 +404,19 @@ export default function PaymentDetailPage() {
               <div className="space-y-4">
                 <div>
                   <p className="text-gray-600 mb-2">Transfer ke Virtual Account:</p>
-                  <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="bg-gray-50 p-4 rounded-lg relative">
                     <p className="text-2xl font-bold text-black font-mono">
                       {payment.vaNumber}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">
                       Bank: {payment.bankType?.toUpperCase()}
                     </p>
+                    <button
+                      onClick={() => copyToClipboard(payment.vaNumber!, "va")}
+                      className="absolute top-2 right-2 px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+                    >
+                      {copied === "va" ? "✓ Disalin" : "Salin VA"}
+                    </button>
                   </div>
                 </div>
                 {payment.expiryTime && (
@@ -384,13 +438,32 @@ export default function PaymentDetailPage() {
                         ? "Scan QR Code dengan aplikasi pembayaran Anda:"
                         : "Scan QR Code dengan GoPay:"}
                     </p>
-                    <div className="flex justify-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={payment.qrCodeUrl}
-                        alt="QR Code"
-                        className="w-64 h-64 border border-gray-200 rounded-lg"
-                      />
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={payment.qrCodeUrl}
+                          alt="QR Code"
+                          className="w-64 h-64 border border-gray-200 rounded-lg"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        {isProduction ? (
+                          <button
+                            onClick={downloadQRCode}
+                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            📥 Download QR Code
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => copyToClipboard(payment.qrCodeUrl!, "qr")}
+                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            {copied === "qr" ? "✓ URL Disalin" : "📋 Salin URL QR"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   {payment.expiryTime && (
@@ -474,7 +547,7 @@ export default function PaymentDetailPage() {
         {/* Back Button */}
         <div className="mt-6">
           <button
-            onClick={() => router.push("/donate")}
+            onClick={() => router.push("/")}
             className="px-6 py-3 bg-gray-200 text-black font-semibold rounded-lg hover:bg-gray-300 transition-colors"
           >
             Kembali ke Form Donasi
