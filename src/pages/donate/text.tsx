@@ -12,167 +12,6 @@ interface TextMessage {
   visible?: boolean;
 }
 
-// TTS function - Browser built-in with high quality, clear, and slow
-function speak(text: string) {
-  if (!("speechSynthesis" in window)) {
-    console.warn("Speech synthesis not supported");
-    return;
-  }
-
-  const speakWithVoice = () => {
-    const voices = window.speechSynthesis.getVoices();
-    
-    if (voices.length === 0) {
-      console.warn("No voices available, retrying...");
-      // Retry after a short delay
-      setTimeout(() => {
-        const retryVoices = window.speechSynthesis.getVoices();
-        if (retryVoices.length > 0) {
-          speakWithVoice();
-        }
-      }, 500);
-      return;
-    }
-
-    // Prioritaskan voice Indonesia yang bagus dan jernih
-    // Cari Google Indonesia terlebih dahulu (paling jernih)
-    const googleIdVoice = voices.find(
-      v => v.lang === "id-ID" && v.name.toLowerCase().includes("google")
-    );
-
-    // Fallback ke voice Indonesia lainnya
-    const idVoice = voices.find(v => v.lang === "id-ID");
-
-    // Pilih voice terbaik
-    const voice = googleIdVoice || idVoice || voices.find(v => v.lang.startsWith("id")) || voices[0];
-
-    if (!voice) {
-      console.warn("No suitable voice found, using default");
-      // Use default voice if no Indonesian voice found
-      const defaultVoice = voices[0];
-      if (!defaultVoice) return;
-    }
-
-    // Bersihkan text untuk TTS
-    const cleanText = text
-      .replace(/Rp/g, "Rupiah ")
-      .replace(/(\d+)/g, (match) => {
-        // Format angka dengan lebih jelas
-        const num = parseInt(match);
-        if (num >= 1000000) {
-          return `${Math.floor(num / 1000000)} juta`;
-        } else if (num >= 1000) {
-          return `${Math.floor(num / 1000)} ribu`;
-        }
-        return match;
-      });
-
-    // Pecah menjadi kalimat untuk jeda natural
-    const sentences = cleanText
-      .split(/([.!?])/)
-      .reduce<string[]>((acc, cur) => {
-        if (!cur.trim()) return acc;
-        if (/[.!?]/.test(cur)) {
-          if (acc.length > 0) {
-            acc[acc.length - 1] += cur;
-          } else {
-            acc.push(cur.trim());
-          }
-        } else {
-          acc.push(cur.trim());
-        }
-        return acc;
-      }, [])
-      .filter(s => s.trim().length > 0);
-
-    if (sentences.length === 0) {
-      console.warn("No sentences to speak");
-      return;
-    }
-
-    // Hentikan suara sebelumnya
-    window.speechSynthesis.cancel();
-
-    // Ucapkan setiap kalimat dengan jeda
-    sentences.forEach((sentence, index) => {
-      const utterance = new SpeechSynthesisUtterance(sentence);
-
-      utterance.voice = voice || null;
-      utterance.lang = voice?.lang || "id-ID";
-      
-      // Pengaturan untuk suara jernih dan slow
-      utterance.rate = 0.75;      // Slow (0.1 - 10, default 1)
-      utterance.pitch = 1.0;      // Normal pitch (0 - 2, default 1)
-      utterance.volume = 1.0;     // Full volume (0 - 1, default 1)
-
-      // Error handling
-      utterance.onerror = (event) => {
-        console.error("TTS error:", event.error);
-      };
-
-      utterance.onstart = () => {
-        console.log("TTS started:", sentence);
-      };
-
-      utterance.onend = () => {
-        console.log("TTS ended:", sentence);
-      };
-
-      // Jeda antar kalimat
-      if (index > 0) {
-        // Add small delay between sentences
-        setTimeout(() => {
-          window.speechSynthesis.speak(utterance);
-        }, index * 300);
-      } else {
-        window.speechSynthesis.speak(utterance);
-      }
-    });
-  };
-
-  // Tunggu voices loaded jika belum ready
-  const voices = window.speechSynthesis.getVoices();
-  if (voices.length === 0) {
-    // Wait for voices to load
-    const checkVoices = () => {
-      const loadedVoices = window.speechSynthesis.getVoices();
-      if (loadedVoices.length > 0) {
-        speakWithVoice();
-      } else {
-        setTimeout(checkVoices, 100);
-      }
-    };
-    window.speechSynthesis.onvoiceschanged = checkVoices;
-    // Also try after a delay
-    setTimeout(checkVoices, 500);
-  } else {
-    speakWithVoice();
-  }
-}
-
-// Helper function to calculate TTS duration based on text length
-// Rate 0.75 means slower speech, approximately 100-150 words per minute
-// Average: ~2 characters per word, so ~150-225 characters per minute
-// Using conservative estimate: ~200 characters per minute = ~3.3 chars per second
-function calculateTTSDuration(text: string): number {
-  if (!text || text.length === 0) {
-    return 0;
-  }
-  
-  // Rate 0.75 means 75% of normal speed
-  // Normal speed: ~150 words/min = ~300 chars/min = ~5 chars/sec
-  // At 0.75 rate: ~3.75 chars/sec
-  // Add buffer for pauses between sentences
-  const charsPerSecond = 3.5; // Conservative estimate for rate 0.75
-  const baseDuration = (text.length / charsPerSecond) * 1000; // Convert to milliseconds
-  
-  // Add extra time for pauses (300ms per sentence break)
-  const sentenceBreaks = (text.match(/[.!?]/g) || []).length;
-  const pauseTime = sentenceBreaks * 300;
-  
-  // Minimum 2 seconds for very short text
-  return Math.max(2000, baseDuration + pauseTime);
-}
 
 // Helper function to calculate display duration based on donation amount
 // 1000 = 10 detik, setiap kelipatan 1000 = +10 detik
@@ -205,7 +44,6 @@ export default function TextPage() {
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pauseStartTimeRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const ttsStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -259,30 +97,8 @@ export default function TextPage() {
                     message = message.substring(0, 250);
                   }
                   
-                  // Calculate TTS duration based on text length
-                  const ttsText = `${data.donorName} baru saja memberikan Rp${data.amount.toLocaleString("id-ID")}${message ? `. ${message}` : ""}`;
-                  const ttsDuration = calculateTTSDuration(ttsText);
-                  
-                  // Use duration from backend, fallback to calculated if not provided
-                  const amountBasedDuration = data.duration || calculateDisplayDuration(data.amount);
-                  
-                  // Text display duration: always 10 seconds (text will disappear after 10 seconds)
-                  // BGM plays for 2 seconds, then TTS starts
-                  // Text disappears after 10 seconds regardless of TTS duration
-                  const finalDuration = 10000; // Always 10 seconds for text display
-                  
-                  console.log("📥 Received text donation:", {
-                    id: data.id,
-                    donorName: data.donorName,
-                    amount: data.amount,
-                    message: message,
-                    messageLength: message ? message.length : 0,
-                    durationFromBackend: data.duration,
-                    amountBasedDuration,
-                    ttsDuration,
-                    ttsTextLength: ttsText.length,
-                    finalDuration,
-                  });
+                  // Always use 10 seconds duration for text donations
+                  const finalDuration = 10000; // 10 seconds
                   
                   // Set duration FIRST before setting text message
                   // This ensures useEffect has the correct duration when it runs
@@ -299,100 +115,41 @@ export default function TextPage() {
                   setIsVisible(true);
                   pauseStartTimeRef.current = null;
 
-                  // Play BGM first for 2 seconds, then TTS will start
+                  // Play BGM once (no loop)
                   if (audioRef.current) {
-                    console.log("🎵 Attempting to play BGM for 2 seconds...");
                     audioRef.current.currentTime = 0; // Reset to start
+                    audioRef.current.loop = false; // Play BGM once only
                     
                     // Check if audio is ready
                     if (audioRef.current.readyState >= 2) { // HAVE_CURRENT_DATA or higher
                       audioRef.current.play()
-                        .then(() => {
-                          console.log("✅ BGM playing successfully");
-                          
-                          // Stop BGM after 2 seconds
-                          setTimeout(() => {
-                            if (audioRef.current) {
-                              audioRef.current.pause();
-                              audioRef.current.currentTime = 0;
-                              console.log("🛑 BGM stopped after 2 seconds");
-                            }
-                          }, 2000);
-                        })
                         .catch((err) => {
                           console.error("❌ Failed to play BGM:", err);
-                          console.error("Error details:", {
-                            name: err.name,
-                            message: err.message,
-                            readyState: audioRef.current?.readyState,
-                            networkState: audioRef.current?.networkState,
-                          });
-                          
                           // Try to load again if failed
                           if (audioRef.current) {
                             audioRef.current.load();
                             setTimeout(() => {
                               if (audioRef.current) {
-                                audioRef.current.play()
-                                  .then(() => {
-                                    // Stop BGM after 2 seconds
-                                    setTimeout(() => {
-                                      if (audioRef.current) {
-                                        audioRef.current.pause();
-                                        audioRef.current.currentTime = 0;
-                                        console.log("🛑 BGM stopped after 2 seconds");
-                                      }
-                                    }, 2000);
-                                  })
-                                  .catch((retryErr) => {
-                                    console.error("❌ Retry play also failed:", retryErr);
-                                  });
+                                audioRef.current.play().catch((retryErr) => {
+                                  console.error("❌ Retry play also failed:", retryErr);
+                                });
                               }
                             }, 100);
                           }
                         });
                     } else {
-                      console.warn("⚠️ Audio not ready yet, readyState:", audioRef.current.readyState);
                       // Wait for audio to be ready
                       const onCanPlay = () => {
                         if (audioRef.current) {
-                          audioRef.current.play()
-                            .then(() => {
-                              // Stop BGM after 2 seconds
-                              setTimeout(() => {
-                                if (audioRef.current) {
-                                  audioRef.current.pause();
-                                  audioRef.current.currentTime = 0;
-                                  console.log("🛑 BGM stopped after 2 seconds");
-                                }
-                              }, 2000);
-                            })
-                            .catch((err) => {
-                              console.error("❌ Failed to play BGM after ready:", err);
-                            });
+                          audioRef.current.play().catch((err) => {
+                            console.error("❌ Failed to play BGM after ready:", err);
+                          });
                           audioRef.current.removeEventListener("canplay", onCanPlay);
                         }
                       };
                       audioRef.current.addEventListener("canplay", onCanPlay);
                     }
-                  } else {
-                    console.error("❌ audioRef.current is null!");
                   }
-
-                  // TTS: Speak the donation message AFTER BGM starts (2 seconds delay)
-                  // TTS will only speak once (no looping)
-                  // TTS will be stopped after 10 seconds total (8 seconds after TTS starts)
-                  setTimeout(() => {
-                    console.log("🎤 Starting TTS after BGM (2 seconds delay):", ttsText);
-                    speak(ttsText);
-                    
-                    // Stop TTS after 10 seconds total (8 seconds after TTS starts)
-                    ttsStopTimeoutRef.current = setTimeout(() => {
-                      console.log("🛑 Stopping TTS after 10 seconds total");
-                      window.speechSynthesis.cancel();
-                      ttsStopTimeoutRef.current = null;
-                    }, 8000); // 8 seconds after TTS starts = 10 seconds total
-                  }, 2000); // Wait 2 seconds for BGM to start
                 }
 
                 if (data.type === "visibility") {
@@ -492,7 +249,7 @@ export default function TextPage() {
   useEffect(() => {
     if (!audioRef.current) {
       const audio = new Audio("/bgm.mp3");
-      audio.loop = false; // Play once, no looping
+      audio.loop = false; // Play BGM once only
       audio.preload = "auto";
       
       // Set volume (some browsers require this for autoplay)
@@ -501,23 +258,6 @@ export default function TextPage() {
       // Add error handling
       audio.addEventListener("error", (e) => {
         console.error("❌ Audio error:", e);
-        console.error("Audio error details:", {
-          code: audio.error?.code,
-          message: audio.error?.message,
-          src: audio.src,
-        });
-      });
-      
-      audio.addEventListener("loadeddata", () => {
-        console.log("✅ BGM audio loaded successfully");
-      });
-      
-      audio.addEventListener("canplay", () => {
-        console.log("✅ BGM audio ready to play");
-      });
-      
-      audio.addEventListener("loadstart", () => {
-        console.log("🔄 BGM audio loading started");
       });
       
       // Try to preload by loading the audio (this helps with autoplay policy)
@@ -528,7 +268,6 @@ export default function TextPage() {
       }
       
       audioRef.current = audio;
-      console.log("🎵 BGM audio initialized:", audio.src);
     }
 
     return () => {
@@ -548,6 +287,11 @@ export default function TextPage() {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
+      // Stop BGM when no donation
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
       setTimeout(() => {
         setRemainingTime(0);
         setTotalDuration(0);
@@ -555,9 +299,8 @@ export default function TextPage() {
       return;
     }
 
-    // Get duration from state or calculate fallback
-    // Duration should already be set from websocket handler, but use fallback if not
-    const currentDuration = totalDuration > 0 ? totalDuration : calculateDisplayDuration(textMessage.amount);
+    // Always use 10 seconds duration for text donations
+    const currentDuration = 10000; // 10 seconds
     
     console.log("⏱️ Timer setup:", {
       donationId: textMessage.id,
@@ -593,12 +336,6 @@ export default function TextPage() {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
           }
-          // Stop TTS
-          window.speechSynthesis.cancel();
-          if (ttsStopTimeoutRef.current) {
-            clearTimeout(ttsStopTimeoutRef.current);
-            ttsStopTimeoutRef.current = null;
-          }
         }
         return newTime;
       });
@@ -616,12 +353,6 @@ export default function TextPage() {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
-      }
-      // Stop TTS
-      window.speechSynthesis.cancel();
-      if (ttsStopTimeoutRef.current) {
-        clearTimeout(ttsStopTimeoutRef.current);
-        ttsStopTimeoutRef.current = null;
       }
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);

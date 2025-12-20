@@ -798,31 +798,28 @@ export default function DonatePage() {
             {/* Payment Method */}
             <div className="flex justify-between items-center pb-3 border-b border-gray-200">
               <span className="text-sm text-gray-600">Metode Pembayaran</span>
-              <div className="flex items-center gap-2">
-                {getPaymentMethodLogo(formData.paymentMethod, formData.currency, formData.bank) && (
-                  <img
-                    src={getPaymentMethodLogo(formData.paymentMethod, formData.currency, formData.bank)!}
-                    alt={getPaymentMethodLabel(formData.paymentMethod)}
-                    className="h-5 object-contain"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.style.display = "none";
-                    }}
-                  />
-                )}
-                <span className="text-sm font-semibold text-gray-900">
-                  {getPaymentMethodLabel(formData.paymentMethod)}
-                </span>
-              </div>
+              <span className="text-sm font-semibold text-gray-900">
+                {getPaymentMethodLabel(formData.paymentMethod)}
+              </span>
             </div>
 
             {/* Bank Selection (if bank_transfer) */}
             {formData.paymentMethod === "bank_transfer" && formData.bank && (
               <div className="flex justify-between items-center pb-3 border-b border-gray-200">
                 <span className="text-sm text-gray-600">Bank</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {formData.bank.toUpperCase()}
-                </span>
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo("bank_transfer", undefined, formData.bank) && (
+                    <img
+                      src={getPaymentMethodLogo("bank_transfer", undefined, formData.bank)!}
+                      alt={formData.bank.toUpperCase()}
+                      className="h-5 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             )}
 

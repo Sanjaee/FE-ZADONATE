@@ -194,8 +194,22 @@ export default function GiftPage() {
                  switch (data.type) {
                    case "donation":
                      if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
-                       // If this is a new donation (different ID), reset previous video
+                       // Only reset if this is a new donation AND current donation has finished
+                       // Don't interrupt ongoing donation - let it finish first
                        if (currentDonationId && currentDonationId !== data.id) {
+                         // Check if current donation is still active (has remaining time)
+                         const currentState = donationStateRef.current;
+                         if (currentState.donationMessage && currentState.remainingTime > 0) {
+                           console.log("⏸️ New donation received but current donation still active, ignoring:", {
+                             currentId: currentDonationId,
+                             newId: data.id,
+                             remainingTime: currentState.remainingTime,
+                           });
+                           // Don't process new donation until current one finishes
+                           return;
+                         }
+                         
+                         // Current donation finished, safe to reset
                          console.log("🔄 New donation received, resetting previous video:", {
                            oldId: currentDonationId,
                            newId: data.id,
@@ -270,88 +284,24 @@ export default function GiftPage() {
                      }
                      break;
 
-                   case "text":
-                     // Handle text donations (same as donation for gif page)
-                     if (data.donorName && data.amount !== undefined && data.amount > 0 && data.id) {
-                       // If this is a new donation (different ID), reset previous video
-                       if (currentDonationId && currentDonationId !== data.id) {
-                         console.log("🔄 New text donation received, resetting previous video:", {
-                           oldId: currentDonationId,
-                           newId: data.id,
-                         });
-                         
-                         // Stop and reset video if playing
-                         if (videoRef.current) {
-                           try {
-                             videoRef.current.pause();
-                             videoRef.current.currentTime = 0;
-                           } catch (e) {
-                             console.warn("Error resetting video:", e);
-                           }
-                         }
-                         
-                         // Destroy YouTube player if exists
-                         if (youtubePlayerRef.current) {
-                           try {
-                             youtubePlayerRef.current.destroy();
-                           } catch (e) {
-                             console.warn("Error destroying YouTube player:", e);
-                           }
-                           youtubePlayerRef.current = null;
-                         }
-                         
-                         // Clear timers
-                         if (donationTimerRef.current) {
-                           clearTimeout(donationTimerRef.current);
-                           donationTimerRef.current = null;
-                         }
-                         if (progressIntervalRef.current) {
-                           clearInterval(progressIntervalRef.current);
-                           progressIntervalRef.current = null;
-                         }
-                       }
-                       
-                       // Validate message max 160 characters
-                       const message = data.message && data.message.length > 160 
-                         ? data.message.substring(0, 160) 
-                         : data.message;
-                       
-                       // Use duration from backend, fallback to calculated if not provided
-                       const duration = data.duration || calculateDisplayDuration(data.amount);
-                       
-                       console.log("📥 Received text donation:", {
-                         id: data.id,
-                         donorName: data.donorName,
-                         amount: data.amount,
-                         durationFromBackend: data.duration,
-                         calculatedDuration: calculateDisplayDuration(data.amount),
-                         finalDuration: duration,
-                       });
-                       
-                       // Set duration FIRST before setting donation message
-                       setTotalDuration(duration);
-                       setRemainingTime(duration);
-                       
-                       setDonationMessage({
-                         id: data.id,
-                         donorName: data.donorName,
-                         amount: data.amount,
-                         message: message,
-                         paymentMethod: data.paymentMethod,
-                         paymentType: data.paymentType,
-                         plisioCurrency: data.plisioCurrency,
-                         plisioAmount: data.plisioAmount,
-                       });
-                       setCurrentDonationId(data.id);
-                       setIsVisible(true);
-                       pauseStartTimeRef.current = null;
-                     }
-                     break;
-
               case "media":
                 if (data.mediaUrl && data.id) {
-                  // If this is a new media (different ID), reset previous video
+                  // Only reset if this is a new media AND current donation has finished
+                  // Don't interrupt ongoing donation - let it finish first
                   if (currentDonationId && currentDonationId !== data.id) {
+                    // Check if current donation is still active (has remaining time)
+                    const currentState = donationStateRef.current;
+                    if (currentState.donationMessage && currentState.remainingTime > 0) {
+                      console.log("⏸️ New media received but current donation still active, ignoring:", {
+                        currentId: currentDonationId,
+                        newId: data.id,
+                        remainingTime: currentState.remainingTime,
+                      });
+                      // Don't process new media until current donation finishes
+                      return;
+                    }
+                    
+                    // Current donation finished, safe to reset
                     console.log("🔄 New media received, resetting previous video:", {
                       oldId: currentDonationId,
                       newId: data.id,
