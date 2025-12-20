@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface DonationHistory {
@@ -41,6 +43,8 @@ interface WebSocketMessage {
 }
 
 export default function HistoryPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [history, setHistory] = useState<DonationHistory[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +58,18 @@ export default function HistoryPage() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+  // Check session and redirect if not authenticated
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/auth/login?callbackUrl=" + encodeURIComponent("/donate/history"));
+    } else if (status === "authenticated") {
+      // Check if user is admin
+      if (session?.user?.role !== "admin" && session?.userType !== "admin") {
+        router.push("/");
+      }
+    }
+  }, [status, session, router]);
 
   const fetchHistory = useCallback(async (currentOffset: number) => {
     try {
@@ -315,6 +331,30 @@ export default function HistoryPage() {
       ? "bg-blue-500"
       : "bg-green-500";
   };
+
+  // Show loading while checking session
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-white p-8">
+        <div className="max-w-7xl mx-auto">
+          <h1 className="text-3xl font-bold text-black mb-8">Donation History</h1>
+          <div className="flex justify-center items-center h-64">
+            <div className="text-gray-600 text-lg">Checking authentication...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (redirect will happen)
+  if (status === "unauthenticated" || !session) {
+    return null;
+  }
+
+  // Don't render if not admin (redirect will happen)
+  if (session?.user?.role !== "admin" && session?.userType !== "admin") {
+    return null;
+  }
 
   if (loading && history.length === 0) {
     return (

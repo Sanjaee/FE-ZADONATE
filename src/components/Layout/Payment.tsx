@@ -732,14 +732,14 @@ export default function PaymentDetailPage() {
                   </div>
                 </div>
                 <div className="flex justify-between items-start">
-                  <span className="text-sm text-gray-500">Nama penerima</span>
+                  <span className="text-sm text-gray-500">Nama Donate</span>
                   <span className="text-sm font-medium text-black text-right">
                     {payment.donorName}
                   </span>
                 </div>
                 {payment.vaNumber && (
                   <div className="flex justify-between items-start">
-                    <span className="text-sm text-gray-500">Nomor rekening</span>
+                    <span className="text-sm text-gray-500">Nomor VA</span>
                     <span className="text-sm font-medium text-right">
                       {payment.vaNumber}
                     </span>

@@ -6,7 +6,7 @@ import {
 } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const onlyAdmin = ["/history", "/donate"];
+const onlyAdmin = ["/history"];
 
 export default function withAuth(
   middleware: NextMiddleware,
