@@ -225,7 +225,7 @@ export const authOptions: NextAuthOptions = {
   jwt: {
     maxAge: 7 * 24 * 60 * 60, // 7 days
   },
-  secret: process.env.NEXTAUTH_SECRET || "fallback-secret-key-change-in-production",
+  secret: process.env.NEXTAUTH_SECRET || "K1E90c5WRly4i69szH9xjkUF-0rDM-tl3WKA06hMayTBDvuOmjjsj3z_i_f7NIFk",
   debug: process.env.NODE_ENV === "development",
   // Ensure NEXTAUTH_URL is set for production
   ...(process.env.NEXTAUTH_URL && { url: process.env.NEXTAUTH_URL }),
