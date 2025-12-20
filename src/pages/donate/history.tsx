@@ -265,12 +265,17 @@ export default function HistoryPage() {
       setClearQueueMessage(null);
       setError(null);
 
+      // Check if user is authenticated
+      if (!session?.accessToken) {
+        throw new Error("You must be logged in to clear the queue. Please login again.");
+      }
+
       const headers: HeadersInit = {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${session.accessToken}`,
       };
-      if (session?.accessToken) {
-        headers["Authorization"] = `Bearer ${session.accessToken}`;
-      }
+
+      console.log("🔄 Clearing queue with token:", session.accessToken ? "Token present" : "No token");
 
       const response = await fetch(`${apiBaseUrl}/hit/reset`, {
         method: "POST",
