@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Routes that require authentication (admin routes)
-  const protectedRoutes = ["/donate/history", "/donate/gif", "/donate/text", "/donate", "/history"];
+  const protectedRoutes = ["/history"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
