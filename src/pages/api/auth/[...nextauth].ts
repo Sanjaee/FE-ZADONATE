@@ -58,14 +58,32 @@ export const authOptions: NextAuthOptions = {
           }
           
           console.log("🔐 Login response status:", response.status, response.statusText);
-          console.log("🔐 Login response headers:", Object.fromEntries(response.headers.entries()));
           
           // Get response text first to check content type
           const responseText = await response.text();
           const contentType = response.headers.get("content-type") || "";
           
           console.log("🔐 Response content-type:", contentType);
-          console.log("🔐 Response text preview:", responseText.substring(0, 200));
+          console.log("🔐 Response text length:", responseText.length);
+          console.log("🔐 Response text preview (first 500 chars):", responseText.substring(0, 500));
+          
+          // Check if response is HTML (error page) or plain text error
+          const trimmedResponse = responseText.trim();
+          const isHTML = contentType.includes("text/html") || 
+                        trimmedResponse.startsWith("<!DOCTYPE") || 
+                        trimmedResponse.startsWith("<html") ||
+                        trimmedResponse.startsWith("<HTML");
+          const isPlainTextError = trimmedResponse.startsWith("Internal Server Error") ||
+                                  trimmedResponse.startsWith("INTERNAL SERVER ERROR") ||
+                                  trimmedResponse.startsWith("Error") ||
+                                  (contentType.includes("text/plain") && !contentType.includes("json"));
+          
+          if (isHTML || isPlainTextError) {
+            console.error("🔐 Backend returned non-JSON response (HTML or plain text error)");
+            console.error("🔐 Content-Type:", contentType);
+            console.error("🔐 Response preview:", trimmedResponse.substring(0, 500));
+            throw new Error(`Backend returned error page instead of JSON (${response.status}). This usually means: 1) Backend URL is incorrect (current: ${backendUrl}), 2) Backend is not accessible from Vercel, or 3) Backend has an internal error. Please check BACKEND_URL environment variable and ensure backend is running and accessible.`);
+          }
           
           if (!response.ok) {
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -77,16 +95,26 @@ export const authOptions: NextAuthOptions = {
                 errorMessage = errorData.error || errorMessage;
               } catch (e) {
                 console.error("🔐 Failed to parse error JSON:", e);
-                errorMessage = `Backend returned non-JSON error. Status: ${response.status}`;
+                console.error("🔐 Error response text:", responseText);
+                errorMessage = `Backend returned non-JSON error. Status: ${response.status}. Response: ${responseText.substring(0, 200)}`;
               }
             } else {
-              // If not JSON, it's probably HTML error page
-              console.error("🔐 Backend returned non-JSON response (likely HTML error page)");
-              errorMessage = `Backend error (${response.status}). Please check backend URL configuration.`;
+              // If not JSON, it's probably HTML error page or plain text
+              console.error("🔐 Backend returned non-JSON response");
+              console.error("🔐 Response text:", responseText);
+              errorMessage = `Backend error (${response.status}). Response: ${responseText.substring(0, 200)}. Please check backend URL configuration: ${backendUrl}`;
             }
             
             console.error("🔐 Login failed:", errorMessage);
             throw new Error(errorMessage);
+          }
+
+          // Validate content type before parsing
+          if (!contentType.includes("application/json")) {
+            console.error("🔐 Backend returned non-JSON response for successful request");
+            console.error("🔐 Content-Type:", contentType);
+            console.error("🔐 Response text:", responseText);
+            throw new Error(`Backend returned non-JSON response. Content-Type: ${contentType}. Please check backend configuration.`);
           }
 
           // Parse JSON response
@@ -96,7 +124,8 @@ export const authOptions: NextAuthOptions = {
           } catch (e) {
             console.error("🔐 Failed to parse response JSON:", e);
             console.error("🔐 Response text:", responseText);
-            throw new Error("Backend returned invalid JSON response. Please check backend configuration.");
+            console.error("🔐 Response length:", responseText.length);
+            throw new Error(`Backend returned invalid JSON response. Error: ${e instanceof Error ? e.message : "Unknown error"}. Response preview: ${responseText.substring(0, 200)}`);
           }
 
           if (!authResponse.success) {
