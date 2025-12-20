@@ -24,13 +24,22 @@ export const authOptions: NextAuthOptions = {
           // Call backend login API
           // Use BACKEND_URL for server-side (NextAuth runs on server), NEXT_PUBLIC_API_URL as fallback
           const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+          
+          // Validate backend URL
+          if (!backendUrl || backendUrl === "http://localhost:5000") {
+            const errorMsg = "BACKEND_URL environment variable is not configured. Please set it in Vercel environment variables.";
+            console.error("🔐", errorMsg);
+            throw new Error(errorMsg);
+          }
+          
           const loginUrl = `${backendUrl}/api/v1/auth/login`;
           
           console.log("🔐 Attempting login to:", loginUrl);
           console.log("🔐 Backend URL env:", {
-            BACKEND_URL: process.env.BACKEND_URL ? `set (${process.env.BACKEND_URL.substring(0, 20)}...)` : "not set",
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? `set (${process.env.NEXT_PUBLIC_API_URL.substring(0, 20)}...)` : "not set",
+            BACKEND_URL: process.env.BACKEND_URL ? "set" : "not set",
+            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ? "set" : "not set",
             NODE_ENV: process.env.NODE_ENV,
+            backendUrl: backendUrl.substring(0, 50) + "...",
           });
           
           let response: Response;
@@ -167,19 +176,35 @@ export const authOptions: NextAuthOptions = {
           };
         } catch (error) {
           console.error("🔐 Authentication error:", error);
+          console.error("🔐 Error type:", typeof error);
           console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
           
+          // NextAuth expects authorize to return null on failure, not throw
+          // But we can throw to pass error message to NextAuth
           if (error instanceof Error) {
             // Return more user-friendly error message
             let errorMessage = error.message || "Login failed. Please check your credentials and backend configuration.";
             
             // Provide more specific error messages
             if (errorMessage.includes("Cannot connect to backend") || errorMessage.includes("Network error")) {
-              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables. Current URL: ${process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "not set"}`;
+              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables.`;
             }
             
-            throw new Error(errorMessage);
+            // Ensure error message is a simple string (no complex objects)
+            errorMessage = String(errorMessage).substring(0, 500); // Limit length
+            
+            // Log the error message that will be shown to user
+            console.error("🔐 Throwing error with message:", errorMessage);
+            
+            // Throw error - NextAuth will catch this and return it in result.error
+            // Use CredentialsSignin error type for better handling
+            const authError = new Error(errorMessage);
+            authError.name = "CredentialsSignin";
+            throw authError;
           }
+          
+          // If error is not an Error instance, return null
+          console.error("🔐 Unknown error type, returning null");
           return null;
         }
       },
