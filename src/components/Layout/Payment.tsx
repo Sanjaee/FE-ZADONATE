@@ -22,6 +22,8 @@ interface Payment {
   bankType?: string;
   qrCodeUrl?: string;
   expiryTime?: string;
+  plisioCurrency?: string;
+  plisioPsysCid?: string;
   createdAt: string;
   updatedAt: string;
   history?: {
@@ -258,6 +260,14 @@ export default function PaymentDetailPage() {
     return `Rp${amount.toLocaleString("id-ID")}`;
   };
 
+  const formatTime = (dateString: string): string => {
+    const date = new Date(dateString);
+    const hours = date.getHours().toString().padStart(2, "0");
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+    const seconds = date.getSeconds().toString().padStart(2, "0");
+    return `${hours}:${minutes}:${seconds}`;
+  };
+
   const getStatusColor = (status: string): string => {
     switch (status) {
       case "SUCCESS":
@@ -336,223 +346,470 @@ export default function PaymentDetailPage() {
       });
   };
 
+  const shareQRCode = async () => {
+    if (!payment?.qrCodeUrl) return;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "QR Code Pembayaran",
+          text: `QR Code untuk pembayaran ${payment.orderId}`,
+          url: payment.qrCodeUrl,
+        });
+      } catch (err) {
+        console.error("Error sharing:", err);
+        copyToClipboard(payment.qrCodeUrl, "qr");
+      }
+    } else {
+      copyToClipboard(payment.qrCodeUrl, "qr");
+    }
+  };
+
+  const getRemainingTime = (expiryTime?: string): string => {
+    if (!expiryTime) return "";
+    
+    const expiry = new Date(expiryTime).getTime();
+    const now = new Date().getTime();
+    const diff = expiry - now;
+    
+    if (diff <= 0) return "00:00:00";
+    
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const [countdown, setCountdown] = useState<string>("");
+
+  useEffect(() => {
+    if (!payment?.expiryTime || payment.status !== "PENDING") return;
+    
+    const updateCountdown = () => {
+      setCountdown(getRemainingTime(payment.expiryTime));
+    };
+    
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    
+    return () => clearInterval(interval);
+  }, [payment?.expiryTime, payment?.status]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-white p-8 flex items-center justify-center">
-        <div className="text-gray-600">Loading...</div>
+      <div className="min-h-screen  flex items-center justify-center">
+        <div className="text-white">Loading...</div>
       </div>
     );
   }
 
   if (error || !payment) {
     return (
-      <div className="min-h-screen bg-white p-8 flex items-center justify-center">
-        <div className="text-red-600">Error: {error || "Payment not found"}</div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-red-400">Error: {error || "Payment not found"}</div>
       </div>
     );
   }
 
+  const formatExpiryDate = (expiryTime?: string): string => {
+    if (!expiryTime) return "";
+    const date = new Date(expiryTime);
+    const dateStr = date.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    const timeStr = formatTime(expiryTime);
+    return `${dateStr}, ${timeStr}`;
+  };
+
+  const getPaymentMethodLabel = (method: string): string => {
+    const labels: { [key: string]: string } = {
+      qris: "QRIS",
+      gopay: "GoPay",
+      bank_transfer: "Bank Transfer",
+      credit_card: "Credit Card",
+      crypto: "Crypto",
+    };
+    return labels[method] || method.toUpperCase();
+  };
+
+  const getPaymentMethodLogo = (method: string, bankType?: string, cryptoCurrency?: string): string | null => {
+    const baseUrl = "https://simulator.sandbox.midtrans.com/assets/images/payment_partners";
+    
+    if (method === "qris") {
+      return `${baseUrl}/e_wallet/qris.png`;
+    }
+    
+    if (method === "gopay") {
+      return `${baseUrl}/e_wallet/gopay.png`;
+    }
+    
+    if (method === "bank_transfer" && bankType) {
+      const bankMap: { [key: string]: string } = {
+        bca: `${baseUrl}/bank_transfer/bca_va.png`,
+        bri: `${baseUrl}/bank_transfer/bri_va.png`,
+        bni: `${baseUrl}/bank_transfer/bni_va.png`,
+        permata: `${baseUrl}/bank_transfer/permata_va.svg`,
+        cimb: `${baseUrl}/bank_transfer/cimb_va.png`,
+        danamon: `${baseUrl}/bank_transfer/danamon_va.svg`,
+        bsi: `${baseUrl}/bank_transfer/bsi_va.svg`,
+        seabank: `${baseUrl}/bank_transfer/seabank_va.svg`,
+      };
+      return bankMap[bankType.toLowerCase()] || null;
+    }
+    
+    if (method === "crypto" && cryptoCurrency) {
+      // Use Plisio icon URL format: https://plisio.net/img/psys-icon/{CID}.svg
+      return `https://plisio.net/img/psys-icon/${cryptoCurrency.toUpperCase()}.svg`;
+    }
+    
+    return null;
+  };
+
   return (
-    <div className="min-h-screen bg-white p-8">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold text-black mb-8">Detail Pembayaran</h1>
-
-        {/* Status Badge */}
-        <div className="mb-6">
-          <span
-            className={`px-4 py-2 rounded-full text-white font-semibold ${getStatusColor(
-              payment.status
-            )}`}
+    <div className="min-h-screen ">
+      {/* Header */}
+      <div className=" text-black px-4 py-4">
+        <div className="max-w-md mx-auto flex items-center gap-4">
+          <button
+            onClick={() => router.push("/")}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
           >
-            {getStatusText(payment.status)}
-          </span>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h1 className="text-lg font-semibold">Payment</h1>
         </div>
+      </div>
 
-        {/* Payment Info */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-          <h2 className="text-xl font-bold text-black mb-4">Informasi Donasi</h2>
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Nama Donatur:</span>
-              <span className="font-semibold text-black">{payment.donorName}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Jumlah:</span>
-              <span className="font-semibold text-black">{formatAmount(payment.amount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Tipe Donasi:</span>
-              <span className="font-semibold text-black capitalize">
-                {payment.donationType}
-              </span>
-            </div>
-            {payment.message && (
-              <div>
-                <span className="text-gray-600">Pesan:</span>
-                <p className="text-black mt-1">{payment.message}</p>
+      <div className="max-w-md mx-auto px-4 pb-8">
+
+        {/* Payment Deadline & Countdown */}
+        {payment.status === "PENDING" && payment.expiryTime && (
+          <div className="bg-black text-white px-4 py-3 mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-300">Finish before</span>
+                <span className="text-sm font-medium">{formatExpiryDate(payment.expiryTime)}</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Payment Instructions */}
-        {payment.status === "PENDING" && (
-          <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-black mb-4">Instruksi Pembayaran</h2>
-
-            {payment.paymentMethod === "bank_transfer" && payment.vaNumber && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-gray-600 mb-2">Transfer ke Virtual Account:</p>
-                  <div className="bg-gray-50 p-4 rounded-lg relative">
-                    <p className="text-2xl font-bold text-black font-mono">
-                      {payment.vaNumber}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Bank: {payment.bankType?.toUpperCase()}
-                    </p>
-                    <button
-                      onClick={() => copyToClipboard(payment.vaNumber!, "va")}
-                      className="absolute top-2 right-2 px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-                    >
-                      {copied === "va" ? "✓ Disalin" : "Salin VA"}
-                    </button>
-                  </div>
-                </div>
-                {payment.expiryTime && (
-                  <div>
-                    <p className="text-sm text-gray-600">
-                      Berlaku hingga: {new Date(payment.expiryTime).toLocaleString("id-ID")}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {(payment.paymentMethod === "gopay" || payment.paymentMethod === "qris") &&
-              payment.qrCodeUrl && (
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-gray-600 mb-4">
-                      {payment.paymentMethod === "qris"
-                        ? "Scan QR Code dengan aplikasi pembayaran Anda:"
-                        : "Scan QR Code dengan GoPay:"}
-                    </p>
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="relative">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={payment.qrCodeUrl}
-                          alt="QR Code"
-                          className="w-64 h-64 border border-gray-200 rounded-lg"
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        {isProduction ? (
-                          <button
-                            onClick={downloadQRCode}
-                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            📥 Download QR Code
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => copyToClipboard(payment.qrCodeUrl!, "qr")}
-                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            {copied === "qr" ? "✓ URL Disalin" : "📋 Salin URL QR"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {payment.expiryTime && (
-                    <div>
-                      <p className="text-sm text-gray-600 text-center">
-                        Berlaku hingga: {new Date(payment.expiryTime).toLocaleString("id-ID")}
-                      </p>
-                    </div>
-                  )}
+              {countdown && (
+                <div className="bg-gray-800 px-3 py-1 rounded-lg">
+                  <span className="text-sm font-mono font-semibold">{countdown}</span>
                 </div>
               )}
-
-            {payment.paymentMethod === "credit_card" && (
-              <div>
-                <p className="text-gray-600">
-                  Silakan selesaikan pembayaran dengan kartu kredit Anda.
-                </p>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* Success Message */}
-        {payment.status === "SUCCESS" && payment.history && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-green-800 mb-2">✅ Pembayaran Berhasil!</h2>
-            <p className="text-green-700">
-              Donasi Anda telah berhasil diproses. Terima kasih atas donasi Anda!
-            </p>
-            {payment.donationType === "gif" && (
-              <p className="text-green-700 mt-2">
-                Media donasi akan ditampilkan sesuai dengan tipe yang Anda pilih.
-              </p>
-            )}
-            {payment.donationType === "text" && (
-              <p className="text-green-700 mt-2">
-                Donasi teks akan ditampilkan sesuai dengan pesan yang Anda berikan.
-              </p>
-            )}
+        {/* Instruction Info */}
+        {payment.status === "PENDING" && (payment.paymentMethod === "qris" || payment.paymentMethod === "gopay") && (
+          <div className="bg-black text-white px-4 py-2 mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-sm text-gray-300">
+              You can use any supported e-wallet or mobile banking apps
+            </span>
           </div>
+        )}
+
+        {/* Payment Card */}
+        {payment.status === "PENDING" && (
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-4">
+
+            {/* Card Header with Logos */}
+            <div className="px-6 pt-6 pb-4 flex items-center justify-between">
+              {(payment.paymentMethod === "qris" || payment.paymentMethod === "gopay") && (
+                <>
+                  <div className="flex items-center gap-2">
+                    {getPaymentMethodLogo(payment.paymentMethod) && (
+                      <img
+                        src={getPaymentMethodLogo(payment.paymentMethod)!}
+                        alt={getPaymentMethodLabel(payment.paymentMethod)}
+                        className="h-6 object-contain"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    )}
+                  </div>
+                  {payment.paymentMethod === "qris" && (
+                    <div className="text-xs text-gray-500">GPN</div>
+                  )}
+                </>
+              )}
+              {payment.paymentMethod === "bank_transfer" && (
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo(payment.paymentMethod, payment.bankType) && (
+                    <img
+                      src={getPaymentMethodLogo(payment.paymentMethod, payment.bankType)!}
+                      alt={payment.bankType?.toUpperCase() || "Bank"}
+                      className="h-6 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+              {payment.paymentMethod === "crypto" && (
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo(payment.paymentMethod, undefined, payment.plisioPsysCid || payment.plisioCurrency) && (
+                    <img
+                      src={getPaymentMethodLogo(payment.paymentMethod, undefined, payment.plisioPsysCid || payment.plisioCurrency)!}
+                      alt={payment.plisioPsysCid || payment.plisioCurrency || "Crypto"}
+                      className="h-6 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Merchant Info */}
+            <div className="px-6 pb-4">
+              <p className="text-sm font-semibold text-black">{payment.donorName}</p>
+              <p className="text-xs text-gray-500 mt-1">Order ID: {payment.orderId}</p>
+            </div>
+
+            {/* QR Code or VA Number */}
+            {(payment.paymentMethod === "qris" || payment.paymentMethod === "gopay") &&
+              payment.qrCodeUrl && (
+                <div className="px-6 pb-4 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={payment.qrCodeUrl}
+                    alt="QR Code"
+                    className="w-64 h-64 border-2 border-gray-100 rounded-xl"
+                  />
+                </div>
+              )}
+
+            {payment.paymentMethod === "bank_transfer" && payment.vaNumber && (
+              <div className="px-6 pb-4">
+                <div className="bg-gray-50 py-6 rounded-xl text-center">
+                  <p className="text-black font-bold font-mono tracking-wider break-all text-[18px]">
+                    {payment.vaNumber}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Bank: {payment.bankType?.toUpperCase()}
+                  </p>
+                  <button
+                    onClick={() => copyToClipboard(payment.vaNumber!, "va")}
+                    className="mt-4 px-4 py-2 bg-black text-white text-sm rounded-lg hover:bg-gray-800 transition-colors"
+                  >
+                    {copied === "va" ? "✓ Disalin" : "Salin VA"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Payment Method & Total */}
+            <div className="px-6 pb-4 space-y-3 border-t border-gray-100 pt-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo(payment.paymentMethod, payment.bankType, payment.plisioPsysCid || payment.plisioCurrency) && (
+                    <img
+                      src={getPaymentMethodLogo(payment.paymentMethod, payment.bankType, payment.plisioPsysCid || payment.plisioCurrency)!}
+                      alt={getPaymentMethodLabel(payment.paymentMethod)}
+                      className="h-5 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                </div>
+                <button className="text-sm text-black font-medium hover:underline">
+                  Change
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">Total</span>
+                <span className="text-lg font-bold text-black">{formatAmount(payment.totalAmount || payment.amount)}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            {(payment.paymentMethod === "qris" || payment.paymentMethod === "gopay") &&
+              payment.qrCodeUrl && (
+                <div className="px-6 pb-6 flex gap-3">
+                  <button
+                    onClick={shareQRCode}
+                    className="flex-1 px-4 py-3 bg-gray-100 text-black text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                    Share
+                  </button>
+                  {isProduction ? (
+                    <button
+                      onClick={downloadQRCode}
+                      className="flex-1 px-4 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => copyToClipboard(payment.qrCodeUrl!, "qr")}
+                      className="flex-1 px-4 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {copied === "qr" ? "✓ Disalin" : "📋 Salin URL"}
+                    </button>
+                  )}
+                </div>
+              )}
+          </div>
+        )}
+
+        {/* Payment Instructions Link */}
+        {payment.status === "PENDING" && (
+          <div className="text-center mb-6">
+            <button className="text-black text-sm font-medium hover:underline">
+              See payment instruction
+            </button>
+          </div>
+        )}
+
+        {/* Success Screen */}
+        {payment.status === "SUCCESS" && (
+          <>
+            {/* Success Icon & Title */}
+            <div className="flex flex-col items-center justify-center py-8 mb-6">
+              <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-black mb-2">Pembayaran Berhasil</h2>
+            </div>
+
+            {/* Payment Details Card */}
+            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-start">
+                  <span className="text-sm text-gray-500">Tanggal</span>
+                  <span className="text-sm font-medium text-black text-right">
+                    {new Date(payment.createdAt).toLocaleDateString("id-ID", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-sm text-gray-500">Waktu</span>
+                  <span className="text-sm font-medium text-black text-right font-mono">
+                    {formatTime(payment.createdAt)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-sm text-gray-500">Metode pembayaran</span>
+                  <div className="flex items-center gap-2">
+                    {getPaymentMethodLogo(payment.paymentMethod, payment.bankType, payment.plisioPsysCid || payment.plisioCurrency) && (
+                      <img
+                        src={getPaymentMethodLogo(payment.paymentMethod, payment.bankType, payment.plisioPsysCid || payment.plisioCurrency)!}
+                        alt={getPaymentMethodLabel(payment.paymentMethod)}
+                        className="h-5 object-contain"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-sm text-gray-500">Nama penerima</span>
+                  <span className="text-sm font-medium text-black text-right">
+                    {payment.donorName}
+                  </span>
+                </div>
+                {payment.vaNumber && (
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm text-gray-500">Nomor rekening</span>
+                    <span className="text-sm font-medium text-right">
+                      {payment.vaNumber}
+                    </span>
+                  </div>
+                )}
+                {payment.message && (
+                  <div className="flex justify-between items-start gap-4">
+                    <span className="text-sm text-gray-500 flex-shrink-0">Catatan</span>
+                    <span className="text-sm font-medium text-black text-right flex-1 break-words">
+                      {payment.message}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-start pt-3 border-t border-gray-100">
+                  <span className="text-sm font-semibold text-gray-700">Total</span>
+                  <span className="text-sm font-bold text-black">
+                    {formatAmount(payment.totalAmount || payment.amount)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-3 mb-4">
+              <button
+                onClick={() => router.push("/")}
+                className="w-full px-4 py-4 bg-black text-white text-base font-semibold rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                Selesai
+              </button>
+              <button
+                onClick={shareQRCode}
+                className="w-full px-4 py-4 bg-white text-black text-base font-medium rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 border border-gray-200"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Bagikan
+              </button>
+            </div>
+          </>
         )}
 
         {/* Failed/Cancelled/Expired Message */}
         {(payment.status === "FAILED" ||
           payment.status === "CANCELLED" ||
           payment.status === "EXPIRED") && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-red-800 mb-2">
-              Pembayaran {getStatusText(payment.status)}
-            </h2>
-            <p className="text-red-700">
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+            <div className="flex flex-col items-center justify-center py-4 mb-4">
+              <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-black mb-2">
+                Pembayaran {getStatusText(payment.status)}
+              </h2>
+            </div>
+            <p className="text-center text-gray-600 mb-6">
               Pembayaran Anda {getStatusText(payment.status).toLowerCase()}. Silakan coba lagi
               atau hubungi support jika ada pertanyaan.
             </p>
+            <button
+              onClick={() => router.push("/")}
+              className="w-full px-4 py-4 bg-black text-white text-base font-semibold rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              Kembali
+            </button>
           </div>
         )}
-
-        {/* Order Info */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-black mb-4">Informasi Order</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Order ID:</span>
-              <span className="font-mono text-black">{payment.orderId}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Metode Pembayaran:</span>
-              <span className="text-black capitalize">
-                {payment.paymentMethod.replace("_", " ")}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Dibuat:</span>
-              <span className="text-black">
-                {new Date(payment.createdAt).toLocaleString("id-ID")}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Back Button */}
-        <div className="mt-6">
-          <button
-            onClick={() => router.push("/")}
-            className="px-6 py-3 bg-gray-200 text-black font-semibold rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            Kembali ke Form Donasi
-          </button>
-        </div>
       </div>
     </div>
   );

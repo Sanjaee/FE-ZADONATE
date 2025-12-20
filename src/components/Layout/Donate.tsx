@@ -13,6 +13,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 // Simple Chevron Icons
 const ChevronDown = ({ className }: { className?: string }) => (
   <svg className={className || "w-4 h-4 text-gray-500"} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -36,13 +46,48 @@ interface CreatePaymentRequest {
   startTime?: number;
   message?: string;
   notes?: string;
-  paymentMethod: "bank_transfer" | "gopay" | "credit_card" | "qris" | "crypto";
+  paymentMethod: "bank_transfer" | "gopay" | "qris" | "crypto";
   bank?: string;
   currency?: string;
 }
 
 // USD to IDR conversion rate (configurable)
 const USD_TO_IDR_RATE = 16500;
+
+// Helper function to get payment method logo URL
+const getPaymentMethodLogo = (method: string, cryptoCurrency?: string, bankType?: string): string | null => {
+  const baseUrl = "https://simulator.sandbox.midtrans.com/assets/images/payment_partners";
+  
+  if (method === "qris") {
+    return `${baseUrl}/e_wallet/qris.png`;
+  }
+  
+  if (method === "gopay") {
+    return `${baseUrl}/e_wallet/gopay.png`;
+  }
+  
+  if (method === "bank_transfer" && bankType) {
+    const bankMap: { [key: string]: string } = {
+      bca: `${baseUrl}/bank_transfer/bca_va.png`,
+      bri: `${baseUrl}/bank_transfer/bri_va.png`,
+      bni: `${baseUrl}/bank_transfer/bni_va.png`,
+      permata: `${baseUrl}/bank_transfer/permata_va.svg`,
+      cimb: `${baseUrl}/bank_transfer/cimb_va.png`,
+      danamon: `${baseUrl}/bank_transfer/danamon_va.svg`,
+      bsi: `${baseUrl}/bank_transfer/bsi_va.svg`,
+      seabank: `${baseUrl}/bank_transfer/seabank_va.svg`,
+      mandiri: `${baseUrl}/bank_transfer/mandiri_va.png`, // Add mandiri if available
+    };
+    return bankMap[bankType.toLowerCase()] || null;
+  }
+  
+  if (method === "crypto" && cryptoCurrency) {
+    // Use Plisio icon URL format: https://plisio.net/img/psys-icon/{CID}.svg
+    return `https://plisio.net/img/psys-icon/${cryptoCurrency.toUpperCase()}.svg`;
+  }
+  
+  return null;
+};
 
 export default function DonatePage() {
   const router = useRouter();
@@ -51,9 +96,10 @@ export default function DonatePage() {
   const [startTimeMinutes, setStartTimeMinutes] = useState<number>(0);
   const [cryptoCurrencies, setCryptoCurrencies] = useState<any[]>([]);
   const [loadingCurrencies, setLoadingCurrencies] = useState(false);
-  const [showCryptoDropdown, setShowCryptoDropdown] = useState(false);
+  const [showCryptoDialog, setShowCryptoDialog] = useState(false);
   const [minAmountUsd, setMinAmountUsd] = useState<number>(1.0);
   const [usdAmount, setUsdAmount] = useState<string>(""); // For crypto: USD input as string (e.g., "3.12")
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
     donorEmail: "",
@@ -107,6 +153,12 @@ export default function DonatePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Show confirmation dialog instead of submitting directly
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirmPayment = async () => {
+    setShowConfirmDialog(false);
     setLoading(true);
 
     try {
@@ -215,8 +267,22 @@ export default function DonatePage() {
     return Math.max(10000, durationMs); // Minimum 10 seconds
   };
 
+  // Format duration from seconds to "X jam X menit X detik"
+  const formatDuration = (seconds: number): string => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours} jam`);
+    if (minutes > 0) parts.push(`${minutes} menit`);
+    if (secs > 0 || parts.length === 0) parts.push(`${secs} detik`);
+    
+    return parts.join(" ");
+  };
+
   return (
-    <div className="min-h-screen bg-white p-8">
+    <div className="min-h-screen bg-white ">
       <div className="max-w-2xl mx-auto">
         <Card>
           <CardHeader>
@@ -318,7 +384,7 @@ export default function DonatePage() {
                         <p className="text-gray-600 mt-1">
                           Durasi tampil:{" "}
                           <span className="font-semibold">
-                            {(calculateDuration(getAmountInIdr()) / 1000).toFixed(0)} detik
+                            {formatDuration(Math.floor(calculateDuration(getAmountInIdr()) / 1000))}
                           </span>
                         </p>
                       </div>
@@ -400,6 +466,26 @@ export default function DonatePage() {
                 </>
               )}
 
+              {/* Message - Moved outside Optional Fields */}
+              <div className="space-y-2">
+                <Label htmlFor="message">
+                  Pesan Donasi <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="message"
+                  name="message"
+                  value={formData.message}
+                  onChange={handleInputChange}
+                  rows={3}
+                  maxLength={250}
+                  required
+                  placeholder="Pesan untuk donasi Anda (maks 250 karakter)"
+                />
+                <p className="text-sm text-muted-foreground">
+                  {formData.message?.length || 0}/250 karakter
+                </p>
+              </div>
+
               {/* Optional Fields Accordion */}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <button
@@ -430,23 +516,6 @@ export default function DonatePage() {
                         onChange={handleInputChange}
                         placeholder="email@example.com"
                       />
-                    </div>
-
-                    {/* Message */}
-                    <div className="space-y-2">
-                      <Label htmlFor="message">Pesan Donasi</Label>
-                      <Textarea
-                        id="message"
-                        name="message"
-                        value={formData.message}
-                        onChange={handleInputChange}
-                        rows={3}
-                        maxLength={250}
-                        placeholder="Pesan untuk donasi Anda (maks 250 karakter)"
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        {formData.message?.length || 0}/250 karakter
-                      </p>
                     </div>
 
                     {/* Notes */}
@@ -481,29 +550,16 @@ export default function DonatePage() {
                         : "border-gray-200 bg-white hover:border-gray-300"
                     }`}
                   >
-                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-lg flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold ${
-                        formData.paymentMethod === "crypto" ? "text-blue-600" : "text-gray-700"
-                      }`}
-                    >
-                      Crypto
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">1%</span>
+                    <img
+                      src={getPaymentMethodLogo("crypto", formData.currency) || "https://plisio.net/img/psys-icon/BTC.svg"}
+                      alt="Crypto"
+                      className="w-16 h-16 object-contain mb-2"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "https://plisio.net/img/psys-icon/BTC.svg";
+                      }}
+                    />
+                    <span className="text-xs text-gray-500">1%</span>
                   </button>
                   {/* QRIS Button */}
                   <button
@@ -515,29 +571,18 @@ export default function DonatePage() {
                         : "border-gray-200 bg-white hover:border-gray-300"
                     }`}
                   >
-                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
-                        />
-                      </svg>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold ${
-                        formData.paymentMethod === "qris" ? "text-blue-600" : "text-gray-700"
-                      }`}
-                    >
-                      QRIS
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">0.7%</span>
+                    {getPaymentMethodLogo("qris") && (
+                      <img
+                        src={getPaymentMethodLogo("qris")!}
+                        alt="QRIS"
+                        className=" mb-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    )}
+                    <span className="text-xs text-gray-500">0.7%</span>
                   </button>
 
                   {/* GoPay Button */}
@@ -550,17 +595,18 @@ export default function DonatePage() {
                         : "border-gray-200 bg-white hover:border-gray-300"
                     }`}
                   >
-                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-                      <span className="text-white font-bold text-lg">G</span>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold ${
-                        formData.paymentMethod === "gopay" ? "text-blue-600" : "text-gray-700"
-                      }`}
-                    >
-                      GoPay
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">2%</span>
+                    {getPaymentMethodLogo("gopay") && (
+                      <img
+                        src={getPaymentMethodLogo("gopay")!}
+                        alt="GoPay"
+                        className="mb-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    )}
+                    <span className="text-xs text-gray-500">2%</span>
                   </button>
 
                   {/* Bank Transfer Button */}
@@ -575,70 +621,35 @@ export default function DonatePage() {
                         : "border-gray-200 bg-white hover:border-gray-300"
                     }`}
                   >
-                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-gray-400 to-gray-500 rounded-lg flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-                        />
-                      </svg>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold ${
-                        formData.paymentMethod === "bank_transfer"
-                          ? "text-blue-600"
-                          : "text-gray-700"
-                      }`}
-                    >
-                      Bank Transfer
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">0%</span>
-                  </button>
-
-                  {/* Credit Card Button */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFormData((prev) => ({ ...prev, paymentMethod: "credit_card" }))
-                    }
-                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
-                      formData.paymentMethod === "credit_card"
-                        ? "border-blue-600 bg-blue-50"
-                        : "border-gray-200 bg-white hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="w-12 h-12 mb-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-                        />
-                      </svg>
-                    </div>
-                    <span
-                      className={`text-sm font-semibold ${
-                        formData.paymentMethod === "credit_card"
-                          ? "text-blue-600"
-                          : "text-gray-700"
-                      }`}
-                    >
-                      Credit Card
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">2.9%</span>
+                    {formData.bank && getPaymentMethodLogo("bank_transfer", undefined, formData.bank) ? (
+                      <img
+                        key={formData.bank}
+                        src={getPaymentMethodLogo("bank_transfer", undefined, formData.bank)!}
+                        alt={formData.bank.toUpperCase()}
+                        className="mb-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="w-16 h-16 bg-gradient-to-br from-gray-400 to-gray-500 rounded-lg flex items-center justify-center mb-2">
+                        <svg
+                          className="w-10 h-10 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    <span className="text-xs text-gray-500">0%</span>
                   </button>
                 </div>
               </div>
@@ -650,7 +661,7 @@ export default function DonatePage() {
                     Pilih Bank <span className="text-red-500">*</span>
                   </Label>
                   <div className="grid grid-cols-2 gap-2">
-                    {["bca", "bni", "mandiri", "permata"].map((bank) => (
+                    {["bca", "bni", "cimb", "permata"].map((bank) => (
                       <button
                         key={bank}
                         type="button"
@@ -684,13 +695,13 @@ export default function DonatePage() {
                         Gagal memuat cryptocurrency. Silakan coba lagi.
                       </div>
                     ) : (
-                      <div className="relative crypto-dropdown-container">
+                      <>
                         <button
                           type="button"
-                          onClick={() => setShowCryptoDropdown(!showCryptoDropdown)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-left flex items-center justify-between"
+                          onClick={() => setShowCryptoDialog(true)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-left flex items-center justify-between hover:bg-gray-50 transition-colors"
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
                             {formData.currency ? (
                               <>
                                 <img
@@ -699,97 +710,42 @@ export default function DonatePage() {
                                       ?.icon || ""
                                   }
                                   alt=""
-                                  className="w-6 h-6"
+                                  className="w-8 h-8"
                                   onError={(e) => {
                                     (e.target as HTMLImageElement).style.display = "none";
                                   }}
                                 />
-                                <span>
-                                  {
-                                    cryptoCurrencies.find((c) => c.cid === formData.currency)
-                                      ?.name
-                                  }{" "}
-                                  (
-                                  {
-                                    cryptoCurrencies.find((c) => c.cid === formData.currency)
-                                      ?.currency
-                                  }
-                                  )
-                                </span>
+                                <div className="text-left">
+                                  <div className="font-semibold text-gray-900">
+                                    {
+                                      cryptoCurrencies.find((c) => c.cid === formData.currency)
+                                        ?.name
+                                    }
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    {
+                                      cryptoCurrencies.find((c) => c.cid === formData.currency)
+                                        ?.currency
+                                    }
+                                  </div>
+                                </div>
                               </>
                             ) : (
-                              <span className="text-gray-500">
-                                Auto (Plisio akan memilih otomatis)
-                              </span>
+                              <div className="text-left">
+                                <div className="font-semibold text-gray-900">Auto</div>
+                                <div className="text-sm text-gray-500">Plisio akan memilih otomatis</div>
+                              </div>
                             )}
                           </div>
-                          {showCryptoDropdown ? (
-                            <ChevronUp className="w-4 h-4 text-gray-500" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4 text-gray-500" />
-                          )}
+                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
                         </button>
-
-                        {showCryptoDropdown && (
-                          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFormData((prev) => ({ ...prev, currency: "" }));
-                                setShowCryptoDropdown(false);
-                                setMinAmountUsd(1.0); // Reset to default minimum
-                              }}
-                              className={`w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-2 ${
-                                !formData.currency ? "bg-blue-50 text-blue-600" : ""
-                              }`}
-                            >
-                              <span className="text-gray-500">Auto (Plisio akan memilih otomatis)</span>
-                            </button>
-                            {cryptoCurrencies.map((crypto) => (
-                              <button
-                                key={crypto.cid}
-                                type="button"
-                                onClick={() => {
-                                  setFormData((prev) => ({ ...prev, currency: crypto.cid }));
-                                  setShowCryptoDropdown(false);
-                                  // Calculate minimum USD amount
-                                  if (crypto.min_sum_in && crypto.fiat_rate) {
-                                    const minSumIn = parseFloat(crypto.min_sum_in);
-                                    const fiatRate = parseFloat(crypto.fiat_rate);
-                                    if (!isNaN(minSumIn) && !isNaN(fiatRate) && fiatRate > 0) {
-                                      const minUsd = (minSumIn / fiatRate) * 1.1; // Add 10% buffer
-                                      setMinAmountUsd(minUsd);
-                                    }
-                                  }
-                                }}
-                                className={`w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-2 ${
-                                  formData.currency === crypto.cid
-                                    ? "bg-blue-50 text-blue-600"
-                                    : ""
-                                }`}
-                              >
-                                <img
-                                  src={crypto.icon}
-                                  alt={crypto.name}
-                                  className="w-6 h-6"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = "none";
-                                  }}
-                                />
-                                <span>
-                                  {crypto.name} ({crypto.currency})
-                                  {crypto.hidden ? " [Hidden]" : ""}
-                                  {crypto.maintenance ? " [Maintenance]" : ""}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                        <p className="text-sm text-muted-foreground">
+                          Klik untuk memilih cryptocurrency. Total {cryptoCurrencies.length} cryptocurrency tersedia.
+                        </p>
+                      </>
                     )}
-                    <p className="text-sm text-muted-foreground">
-                      Biarkan kosong untuk memilih otomatis, atau pilih cryptocurrency spesifik. Total {cryptoCurrencies.length} cryptocurrency tersedia. Jumlah USD akan dikonversi ke cryptocurrency yang dipilih.
-                    </p>
                   </div>
                 </div>
               )}
@@ -807,6 +763,304 @@ export default function DonatePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-bold text-center">
+              Konfirmasi Pembayaran
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-gray-600">
+              Silakan periksa detail pembayaran Anda sebelum melanjutkan
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {/* Payment Details Card */}
+          <div className="bg-gray-50 rounded-xl p-6 space-y-4 my-4">
+            {/* Donor Name */}
+            <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span className="text-sm text-gray-600">Nama Donatur</span>
+              <span className="text-sm font-semibold text-gray-900">{formData.donorName}</span>
+            </div>
+
+            {/* Amount */}
+            <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span className="text-sm text-gray-600">Jumlah Donasi</span>
+              <span className="text-lg font-bold text-gray-900">
+                {formData.paymentMethod === "crypto" 
+                  ? `$${parseFloat(usdAmount || "0").toFixed(2)} USD`
+                  : `Rp ${formData.amount.toLocaleString("id-ID")}`
+                }
+              </span>
+            </div>
+
+            {/* Payment Method */}
+            <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span className="text-sm text-gray-600">Metode Pembayaran</span>
+              <div className="flex items-center gap-2">
+                {getPaymentMethodLogo(formData.paymentMethod, formData.currency, formData.bank) && (
+                  <img
+                    src={getPaymentMethodLogo(formData.paymentMethod, formData.currency, formData.bank)!}
+                    alt={getPaymentMethodLabel(formData.paymentMethod)}
+                    className="h-5 object-contain"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = "none";
+                    }}
+                  />
+                )}
+                <span className="text-sm font-semibold text-gray-900">
+                  {getPaymentMethodLabel(formData.paymentMethod)}
+                </span>
+              </div>
+            </div>
+
+            {/* Bank Selection (if bank_transfer) */}
+            {formData.paymentMethod === "bank_transfer" && formData.bank && (
+              <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                <span className="text-sm text-gray-600">Bank</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {formData.bank.toUpperCase()}
+                </span>
+              </div>
+            )}
+
+            {/* Crypto Currency (if crypto) */}
+            {formData.paymentMethod === "crypto" && formData.currency && (
+              <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                <span className="text-sm text-gray-600">Cryptocurrency</span>
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo("crypto", formData.currency) && (
+                    <img
+                      src={getPaymentMethodLogo("crypto", formData.currency)!}
+                      alt="Crypto"
+                      className="h-5 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                  <span className="text-sm font-semibold text-gray-900">
+                    {cryptoCurrencies.find((c) => c.cid === formData.currency)?.name || formData.currency}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Donation Type */}
+            <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span className="text-sm text-gray-600">Tipe Donasi</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {formData.donationType === "gif" ? "Media" : "Text Only"}
+              </span>
+            </div>
+
+            {/* Message */}
+            <div className="flex flex-col gap-1 pt-3 border-t border-gray-200">
+              <span className="text-sm text-gray-600">Pesan</span>
+              <span className="text-sm font-medium text-gray-900 break-words">
+                {formData.message || "-"}
+              </span>
+            </div>
+
+            {/* Media URL (if Media donation type) */}
+            {formData.donationType === "gif" && formData.mediaUrl && (
+              <div className="flex flex-col gap-1 pt-3 border-t border-gray-200">
+                <span className="text-sm text-gray-600">Media URL</span>
+                <span className="text-sm font-medium text-gray-900 break-all">
+                  {formData.mediaUrl}
+                </span>
+              </div>
+            )}
+
+            {/* Durasi Tampil - for all payment methods */}
+            <div className="pt-3 border-t border-gray-300">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-gray-700">Durasi Tampil</span>
+                <span className="text-sm font-bold text-blue-600">
+                  {formatDuration(Math.floor(calculateDuration(getAmountInIdr()) / 1000))}
+                </span>
+              </div>
+              {formData.paymentMethod === "crypto" && (
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs text-gray-500">Setara dengan</span>
+                  <span className="text-xs text-gray-500">
+                    Rp {getAmountInIdr().toLocaleString("id-ID")}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel className="w-full sm:w-auto">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmPayment}
+              disabled={loading}
+              className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white"
+            >
+              {loading ? "Memproses..." : "Konfirmasi & Bayar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Crypto Currency Selection Dialog */}
+      <AlertDialog open={showCryptoDialog} onOpenChange={setShowCryptoDialog}>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-bold">
+              Pilih Cryptocurrency
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Pilih cryptocurrency yang ingin Anda gunakan untuk pembayaran
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="flex-1 overflow-y-auto py-4">
+            {/* Auto Option */}
+            <button
+              type="button"
+              onClick={() => {
+                setFormData((prev) => ({ ...prev, currency: "" }));
+                setShowCryptoDialog(false);
+                setMinAmountUsd(1.0);
+              }}
+              className={`w-full p-4 rounded-lg border-2 transition-all mb-3 text-left ${
+                !formData.currency
+                  ? "border-blue-600 bg-blue-50"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-900">Auto</div>
+                  <div className="text-sm text-gray-500">Plisio akan memilih otomatis</div>
+                </div>
+              </div>
+            </button>
+
+            {/* Crypto List with Details */}
+            <div className="space-y-2">
+              {cryptoCurrencies.map((crypto) => {
+                const minSumIn = parseFloat(crypto.min_sum_in || "0");
+                const fiatRate = parseFloat(crypto.fiat_rate || "0");
+                const minUsd = fiatRate > 0 ? (minSumIn / fiatRate) : 0;
+                const commission = parseFloat(crypto.invoice_commission_percentage || "0");
+                
+                return (
+                  <button
+                    key={crypto.cid}
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, currency: crypto.cid }));
+                      setShowCryptoDialog(false);
+                      // Calculate minimum USD amount
+                      if (crypto.min_sum_in && crypto.fiat_rate) {
+                        const minSumIn = parseFloat(crypto.min_sum_in);
+                        const fiatRate = parseFloat(crypto.fiat_rate);
+                        if (!isNaN(minSumIn) && !isNaN(fiatRate) && fiatRate > 0) {
+                          const minUsd = (minSumIn / fiatRate) * 1.1; // Add 10% buffer
+                          setMinAmountUsd(minUsd);
+                        }
+                      }
+                    }}
+                    className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
+                      formData.currency === crypto.cid
+                        ? "border-blue-600 bg-blue-50"
+                        : "border-gray-200 bg-white hover:border-gray-300"
+                    } ${crypto.hidden || crypto.maintenance ? "opacity-50" : ""}`}
+                    disabled={crypto.hidden || crypto.maintenance}
+                  >
+                    <div className="flex items-start gap-4">
+                      {/* Icon */}
+                      <img
+                        src={crypto.icon}
+                        alt={crypto.name}
+                        className="w-12 h-12 object-contain flex-shrink-0"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                      
+                      {/* Details */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`font-semibold ${formData.currency === crypto.cid ? "text-blue-600" : "text-gray-900"}`}>
+                            {crypto.name}
+                          </div>
+                          <div className="text-sm text-gray-500">({crypto.currency})</div>
+                          {crypto.hidden && (
+                            <span className="text-xs text-red-500 bg-red-50 px-2 py-0.5 rounded">Hidden</span>
+                          )}
+                          {crypto.maintenance && (
+                            <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded">Maintenance</span>
+                          )}
+                        </div>
+                        
+                        {/* Important Fields - Fee and Min only */}
+                        <div className="flex gap-4 mt-2 text-xs">
+                          {minUsd > 0 && (
+                            <div>
+                              <span className="text-gray-500">Min: </span>
+                              <span className="font-medium text-gray-900">
+                                ${minUsd.toFixed(4)} USD
+                              </span>
+                            </div>
+                          )}
+                          {commission > 0 && (
+                            <div>
+                              <span className="text-gray-500">Fee: </span>
+                              <span className="font-medium text-gray-900">
+                                {commission}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Selection Indicator */}
+                      {formData.currency === crypto.cid && (
+                        <div className="flex-shrink-0">
+                          <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
+// Helper function to get payment method label
+const getPaymentMethodLabel = (method: string): string => {
+  const labels: { [key: string]: string } = {
+    qris: "QRIS",
+    gopay: "GoPay",
+    bank_transfer: "Bank Transfer",
+    credit_card: "Credit Card",
+    crypto: "Crypto",
+  };
+  return labels[method] || method.toUpperCase();
+};
