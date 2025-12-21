@@ -772,7 +772,7 @@ export default function PaymentDetailPage() {
                 )}
                 {payment.message && (
                   <div className="flex justify-between items-start gap-4">
-                    <span className="text-sm text-gray-500 flex-shrink-0">Catatan</span>
+                    <span className="text-sm text-gray-500 flex-shrink-0">Pesan Donasi</span>
                     <span className="text-sm font-medium text-black text-right flex-1 break-words">
                       {payment.message}
                     </span>
