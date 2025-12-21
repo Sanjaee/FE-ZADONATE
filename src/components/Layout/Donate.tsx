@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
+import { z } from "zod";
 import {
   Card,
   CardContent,
@@ -23,6 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
 // Simple Chevron Icons
 const ChevronDown = ({ className }: { className?: string }) => (
   <svg className={className || "w-4 h-4 text-gray-500"} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -53,6 +55,78 @@ interface CreatePaymentRequest {
 
 // USD to IDR conversion rate (configurable)
 const USD_TO_IDR_RATE = 16500;
+
+// Zod schema for form validation
+// Base schema
+const baseCreatePaymentSchema = z.object({
+  donorName: z
+    .string()
+    .min(1, "Nama donatur wajib diisi")
+    .max(16, "Nama donatur maksimal 16 karakter"),
+  donorEmail: z
+    .string()
+    .email("Format email tidak valid")
+    .optional()
+    .or(z.literal("")),
+  amount: z
+    .number()
+    .min(1, "Jumlah donasi harus lebih dari 0"),
+  donationType: z.enum(["gif", "text"]),
+  mediaUrl: z
+    .string()
+    .url("Format URL tidak valid")
+    .optional()
+    .or(z.literal("")),
+  mediaType: z.string().optional(),
+  startTime: z.number().min(0).optional(),
+  message: z
+    .string()
+    .min(1, "Pesan donasi wajib diisi")
+    .max(250, "Pesan donasi maksimal 250 karakter"),
+  notes: z.string().optional().or(z.literal("")),
+  paymentMethod: z.enum(["bank_transfer", "gopay", "qris", "crypto"]),
+  bank: z.string().optional(),
+  currency: z.string().optional(),
+});
+
+// Create final schema with refinements
+const createPaymentSchema = baseCreatePaymentSchema.refine((data) => {
+  // If donationType is "gif", mediaUrl is required
+  if (data.donationType === "gif") {
+    return data.mediaUrl && data.mediaUrl.trim().length > 0;
+  }
+  return true;
+}, {
+  message: "Media URL wajib diisi untuk tipe donasi Media",
+  path: ["mediaUrl"],
+}).refine((data) => {
+  // If paymentMethod is "bank_transfer", bank is required
+  if (data.paymentMethod === "bank_transfer") {
+    return data.bank && data.bank.trim().length > 0;
+  }
+  return true;
+}, {
+  message: "Bank wajib dipilih untuk metode pembayaran Bank Transfer",
+  path: ["bank"],
+}).refine((data) => {
+  // For non-crypto payment methods, amount must be >= 1000 (IDR minimum)
+  if (data.paymentMethod !== "crypto") {
+    return data.amount >= 1000;
+  }
+  return true;
+}, {
+  message: "Minimum donasi Rp 1.000",
+  path: ["amount"],
+}).refine((data) => {
+  // For non-crypto payment methods, amount must be an integer (IDR)
+  if (data.paymentMethod !== "crypto") {
+    return Number.isInteger(data.amount);
+  }
+  return true;
+}, {
+  message: "Jumlah donasi harus berupa bilangan bulat",
+  path: ["amount"],
+});
 
 // Helper function to get payment method logo URL
 const getPaymentMethodLogo = (method: string, cryptoCurrency?: string, bankType?: string): string | null => {
@@ -91,6 +165,7 @@ const getPaymentMethodLogo = (method: string, cryptoCurrency?: string, bankType?
 
 export default function DonatePage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [showOptional, setShowOptional] = useState(false);
   const [startTimeMinutes, setStartTimeMinutes] = useState<number>(0);
@@ -101,6 +176,7 @@ export default function DonatePage() {
   const [usdAmount, setUsdAmount] = useState<string>(""); // For crypto: USD input as string (e.g., "3.12")
   const [formattedAmount, setFormattedAmount] = useState<string>(""); // For non-crypto: formatted Rupiah with dots (e.g., "50.000")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
     donorEmail: "",
@@ -160,10 +236,123 @@ export default function DonatePage() {
     }
   }, [formData.paymentMethod, apiBaseUrl]);
 
+  // Function to scroll to first error field
+  const scrollToFirstError = (errors: Record<string, string>) => {
+    const firstErrorField = Object.keys(errors)[0];
+    if (firstErrorField) {
+      const element = document.getElementById(firstErrorField);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.focus();
+      }
+    }
+  };
+
+  // Function to scroll to bottom when payment method is clicked
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: "smooth",
+      });
+    }, 100);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Show confirmation dialog instead of submitting directly
-    setShowConfirmDialog(true);
+    
+    // Clear previous errors
+    setFormErrors({});
+    
+    // Additional validation for crypto payment method
+    if (formData.paymentMethod === "crypto") {
+      const usdValue = parseFloat(usdAmount) || 0;
+      if (!usdAmount || usdAmount.trim() === "" || usdValue <= 0) {
+        const errorMsg = formData.currency 
+          ? `Jumlah donasi USD wajib diisi (minimum $${minAmountUsd.toFixed(2)})`
+          : "Jumlah donasi USD wajib diisi (minimum $0.01)";
+        setFormErrors({ amount: errorMsg });
+        toast({
+          title: "Validasi Gagal",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          scrollToFirstError({ amount: errorMsg });
+        }, 100);
+        return;
+      }
+      
+      // Check minimum amount if currency is selected
+      if (formData.currency && usdValue < minAmountUsd) {
+        const errorMsg = `Jumlah donasi minimum adalah $${minAmountUsd.toFixed(2)} USD untuk cryptocurrency yang dipilih`;
+        setFormErrors({ amount: errorMsg });
+        toast({
+          title: "Validasi Gagal",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          scrollToFirstError({ amount: errorMsg });
+        }, 100);
+        return;
+      }
+      
+      // Check minimum 0.01 USD for crypto
+      if (usdValue < 0.01) {
+        const errorMsg = "Jumlah donasi minimum adalah $0.01 USD";
+        setFormErrors({ amount: errorMsg });
+        toast({
+          title: "Validasi Gagal",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          scrollToFirstError({ amount: errorMsg });
+        }, 100);
+        return;
+      }
+    }
+    
+    try {
+      // Validate form data with Zod
+      createPaymentSchema.parse(formData);
+      
+      // Show confirmation dialog if validation passes
+      setShowConfirmDialog(true);
+    } catch (error: unknown) {
+      if (error instanceof z.ZodError) {
+        // Map Zod errors to form errors
+        const errors: Record<string, string> = {};
+        error.issues.forEach((err: z.ZodIssue) => {
+          if (err.path.length > 0) {
+            const field = err.path[0] as string;
+            errors[field] = err.message;
+          }
+        });
+        setFormErrors(errors);
+        
+        // Show toast with error messages
+        const errorMessages = Object.values(errors).join(", ");
+        toast({
+          title: "Validasi Gagal",
+          description: `Mohon perbaiki input berikut: ${errorMessages}`,
+          variant: "destructive",
+        });
+        
+        // Scroll to first error field
+        setTimeout(() => {
+          scrollToFirstError(errors);
+        }, 100);
+      } else {
+        console.error("Validation error:", error);
+        toast({
+          title: "Validasi Gagal",
+          description: "Terjadi kesalahan validasi. Silakan coba lagi.",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const handleConfirmPayment = async () => {
@@ -212,14 +401,26 @@ export default function DonatePage() {
         if (paymentId) {
           router.push(`/${paymentId}`);
         } else {
-          alert("Payment created but unable to redirect");
+          toast({
+            title: "Error",
+            description: "Payment created but unable to redirect",
+            variant: "destructive",
+          });
         }
       } else {
-        alert("Failed to create payment: " + (data.error || "Unknown error"));
+        toast({
+          title: "Gagal Membuat Pembayaran",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error("Error creating payment:", error);
-      alert("Failed to create payment");
+      toast({
+        title: "Gagal Membuat Pembayaran",
+        description: "Terjadi kesalahan saat membuat pembayaran. Silakan coba lagi.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -229,6 +430,15 @@ export default function DonatePage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
+    
+    // Clear error for this field when user types
+    if (formErrors[name]) {
+      setFormErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
     
     // Handle amount input differently for crypto vs non-crypto
     if (name === "amount") {
@@ -261,10 +471,19 @@ export default function DonatePage() {
         }));
       }
     } else {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
+      // For donorName, limit to 16 characters
+      if (name === "donorName") {
+        const limitedValue = value.slice(0, 16);
+        setFormData((prev) => ({
+          ...prev,
+          [name]: limitedValue,
+        }));
+      } else {
+        setFormData((prev) => ({
+          ...prev,
+          [name]: value,
+        }));
+      }
     }
   };
   
@@ -321,9 +540,17 @@ export default function DonatePage() {
                   type="text"
                   value={formData.donorName}
                   onChange={handleInputChange}
-                  required
+                  
                   placeholder="Masukkan nama Anda"
+                  maxLength={16}
+                  className={formErrors.donorName ? "border-red-500 animate-pulse" : ""}
                 />
+                {formErrors.donorName && (
+                  <p className="text-sm text-red-500">{formErrors.donorName}</p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  {formData.donorName.length}/16 karakter
+                </p>
               </div>
 
               {/* Amount */}
@@ -343,13 +570,17 @@ export default function DonatePage() {
                       : formattedAmount
                   }
                   onChange={handleInputChange}
-                  required
+                  
                   placeholder={
                     formData.paymentMethod === "crypto"
                       ? `3.12 (minimum $${minAmountUsd.toFixed(2)})`
                       : "50.000"
                   }
+                  className={formErrors.amount ? "border-red-500 animate-pulse" : ""}
                 />
+                {formErrors.amount && (
+                  <p className="text-sm text-red-500">{formErrors.amount}</p>
+                )}
                 {formData.paymentMethod !== "crypto" && (
                   <>
                     <div className="flex gap-2 flex-wrap">
@@ -449,9 +680,13 @@ export default function DonatePage() {
                       type="url"
                       value={formData.mediaUrl || ""}
                       onChange={handleInputChange}
-                      required
+                      
                       placeholder="https://example.com/video.mp4 atau YouTube URL"
+                      className={formErrors.mediaUrl ? "border-red-500 animate-pulse" : ""}
                     />
+                    {formErrors.mediaUrl && (
+                      <p className="text-sm text-red-500">{formErrors.mediaUrl}</p>
+                    )}
                     <p className="text-sm text-muted-foreground">
                       Masukkan URL video, gambar, YouTube, TikTok, atau Instagram Reels
                     </p>
@@ -490,9 +725,13 @@ export default function DonatePage() {
                   onChange={handleInputChange}
                   rows={3}
                   maxLength={250}
-                  required
+                  
                   placeholder="Pesan untuk donasi Anda (maks 250 karakter)"
+                  className={formErrors.message ? "border-red-500 animate-pulse" : ""}
                 />
+                {formErrors.message && (
+                  <p className="text-sm text-red-500">{formErrors.message}</p>
+                )}
                 <p className="text-sm text-muted-foreground">
                   {formData.message?.length || 0}/250 karakter
                 </p>
@@ -527,7 +766,11 @@ export default function DonatePage() {
                         value={formData.donorEmail}
                         onChange={handleInputChange}
                         placeholder="email@example.com"
+                        className={formErrors.donorEmail ? "border-red-500 animate-pulse" : ""}
                       />
+                      {formErrors.donorEmail && (
+                        <p className="text-sm text-red-500">{formErrors.donorEmail}</p>
+                      )}
                     </div>
 
                     {/* Notes */}
@@ -555,7 +798,10 @@ export default function DonatePage() {
                   {/* Crypto Button */}
                   <button
                     type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "crypto" }))}
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, paymentMethod: "crypto" }));
+                      scrollToBottom();
+                    }}
                     className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "crypto"
                         ? "border-blue-600 bg-blue-50"
@@ -576,7 +822,10 @@ export default function DonatePage() {
                   {/* QRIS Button */}
                   <button
                     type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "qris" }))}
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, paymentMethod: "qris" }));
+                      scrollToBottom();
+                    }}
                     className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "qris"
                         ? "border-blue-600 bg-blue-50"
@@ -600,7 +849,10 @@ export default function DonatePage() {
                   {/* GoPay Button */}
                   <button
                     type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, paymentMethod: "gopay" }))}
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, paymentMethod: "gopay" }));
+                      scrollToBottom();
+                    }}
                     className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "gopay"
                         ? "border-blue-600 bg-blue-50"
@@ -624,9 +876,10 @@ export default function DonatePage() {
                   {/* Bank Transfer Button */}
                   <button
                     type="button"
-                    onClick={() =>
-                      setFormData((prev) => ({ ...prev, paymentMethod: "bank_transfer" }))
-                    }
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, paymentMethod: "bank_transfer" }));
+                      scrollToBottom();
+                    }}
                     className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
                       formData.paymentMethod === "bank_transfer"
                         ? "border-blue-600 bg-blue-50"
@@ -688,6 +941,9 @@ export default function DonatePage() {
                       </button>
                     ))}
                   </div>
+                  {formErrors.bank && (
+                    <p className="text-sm text-red-500 mt-2">{formErrors.bank}</p>
+                  )}
                 </div>
               )}
 

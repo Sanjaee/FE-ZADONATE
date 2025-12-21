@@ -60,6 +60,8 @@ export default function PaymentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [statusChanged, setStatusChanged] = useState(false);
+  const [previousStatus, setPreviousStatus] = useState<string | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -79,7 +81,9 @@ export default function PaymentDetailPage() {
 
       const data = await response.json();
       if (data.success) {
-        setPayment(data.data);
+        const paymentData = data.data;
+        setPreviousStatus(paymentData.status);
+        setPayment(paymentData);
       } else {
         throw new Error(data.error || "Failed to fetch payment");
       }
@@ -113,7 +117,20 @@ export default function PaymentDetailPage() {
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data) {
-            setPayment(data.data);
+            setPayment((prev) => {
+              if (!prev) return data.data;
+              
+              // Check if status changed
+              if (prev.status !== data.data.status) {
+                setPreviousStatus(prev.status);
+                setStatusChanged(true);
+                // Reset animation after 1 second
+                setTimeout(() => setStatusChanged(false), 1000);
+              }
+              
+              return data.data;
+            });
+            
             // Stop polling if payment is no longer pending
             if (data.data.status !== "PENDING") {
               clearInterval(pollInterval);
@@ -183,6 +200,14 @@ export default function PaymentDetailPage() {
                     
                     setPayment((prev) => {
                       if (!prev) return prev;
+                      
+                      // Check if status changed
+                      if (prev.status !== data.status) {
+                        setPreviousStatus(prev.status);
+                        setStatusChanged(true);
+                        // Reset animation after 1 second
+                        setTimeout(() => setStatusChanged(false), 1000);
+                      }
                       
                       return {
                         ...prev,
@@ -685,15 +710,15 @@ export default function PaymentDetailPage() {
 
         {/* Success Screen */}
         {payment.status === "SUCCESS" && (
-          <>
+          <div className={`transition-all duration-500 ${statusChanged && previousStatus === "PENDING" ? "animate-in fade-in slide-in-from-bottom-4" : ""}`}>
             {/* Success Icon & Title */}
-            <div className="flex flex-col items-center justify-center py-8 mb-6">
-              <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-bold text-black mb-2">Pembayaran Berhasil</h2>
+            <div className="flex flex-col items-center justify-center py-6 mb-2">
+            <img
+                  src="/checklist.gif"
+                  alt="Success"
+                  className="w-[200px] mb-5"
+                />
+              <h2 className="text-2xl font-bold text-black ">Pembayaran Berhasil</h2>
             </div>
 
             {/* Payment Details Card */}
@@ -780,19 +805,22 @@ export default function PaymentDetailPage() {
                 Bagikan
               </button>
             </div>
-          </>
+          </div>
         )}
 
         {/* Failed/Cancelled/Expired Message */}
         {(payment.status === "FAILED" ||
           payment.status === "CANCELLED" ||
           payment.status === "EXPIRED") && (
-          <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+          <div className={`bg-white rounded-2xl shadow-xl p-6 mb-4 transition-all duration-500 ${statusChanged && previousStatus === "PENDING" ? "animate-in fade-in slide-in-from-bottom-4" : ""}`}>
             <div className="flex flex-col items-center justify-center py-4 mb-4">
-              <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center mb-4 overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/checklist.gif"
+                  alt="Failed"
+                  className="w-16 h-16 object-contain"
+                />
               </div>
               <h2 className="text-2xl font-bold text-black mb-2">
                 Pembayaran {getStatusText(payment.status)}
