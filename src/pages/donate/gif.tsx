@@ -371,6 +371,67 @@ export default function GiftPage() {
                 }
                 break;
 
+              case "clear_queue":
+                console.log("🗑️ Clear queue message received, stopping all videos and clearing queue");
+                
+                // Stop and reset video if playing
+                if (videoRef.current) {
+                  try {
+                    videoRef.current.pause();
+                    videoRef.current.currentTime = 0;
+                  } catch (e) {
+                    console.warn("Error stopping video:", e);
+                  }
+                }
+                
+                // Destroy YouTube player if exists
+                if (youtubePlayerRef.current) {
+                  try {
+                    youtubePlayerRef.current.destroy();
+                  } catch (e) {
+                    console.warn("Error destroying YouTube player:", e);
+                  }
+                  youtubePlayerRef.current = null;
+                }
+                
+                // Clear YouTube iframe
+                if (youtubeIframeRef.current) {
+                  youtubeIframeRef.current = null;
+                }
+                
+                // Clear all timers
+                if (donationTimerRef.current) {
+                  clearTimeout(donationTimerRef.current);
+                  donationTimerRef.current = null;
+                }
+                if (progressIntervalRef.current) {
+                  clearInterval(progressIntervalRef.current);
+                  progressIntervalRef.current = null;
+                }
+                
+                // Clear all state
+                setMediaUrl(null);
+                setMediaType(null);
+                setStartTime(0);
+                setDonationMessage(null);
+                setCurrentDonationId(null);
+                setIsVisible(true);
+                setRemainingTime(0);
+                setTotalDuration(0);
+                setVideoDuration(0);
+                pauseStartTimeRef.current = null;
+                
+                // Clear donation state ref
+                donationStateRef.current = {
+                  donationMessage: null,
+                  totalDuration: 0,
+                  remainingTime: 0,
+                  startTime: 0,
+                };
+                
+                console.log("✅ All videos stopped and queue cleared");
+                break;
+
               case "visibility":
                 // Handle visibility for current donation
                 if (data.id && data.id === currentDonationId) {

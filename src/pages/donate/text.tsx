@@ -189,6 +189,42 @@ export default function TextPage() {
                   }
                 }
 
+                if (data.type === "clear_queue") {
+                  console.log("🗑️ Clear queue message received, stopping all text donations and clearing queue");
+                  
+                  // Stop audio if playing
+                  if (audioRef.current) {
+                    try {
+                      audioRef.current.pause();
+                      audioRef.current.currentTime = 0;
+                    } catch (e) {
+                      console.warn("Error stopping audio:", e);
+                    }
+                  }
+                  
+                  // Clear all timers
+                  if (progressIntervalRef.current) {
+                    clearInterval(progressIntervalRef.current);
+                    progressIntervalRef.current = null;
+                  }
+                  
+                  // Clear all state
+                  setTextMessage(null);
+                  setCurrentDonationId(null);
+                  setIsVisible(true);
+                  setRemainingTime(0);
+                  setTotalDuration(0);
+                  pauseStartTimeRef.current = null;
+                  
+                  // Clear text state ref
+                  textStateRef.current = {
+                    textMessage: null,
+                    remainingTime: 0,
+                  };
+                  
+                  console.log("✅ All text donations stopped and queue cleared");
+                }
+
                 if (data.type === "visibility") {
                   // Handle visibility for current donation
                   if (data.id && data.id === currentDonationId) {
