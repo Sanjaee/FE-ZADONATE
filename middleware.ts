@@ -6,7 +6,8 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Routes that require authentication (admin routes)
-  const protectedRoutes = ["/donate/history", "/history"];
+  // Only /donate/history requires authentication
+  const protectedRoutes = ["/donate/history"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
@@ -45,7 +46,7 @@ export async function middleware(request: NextRequest) {
       secret: process.env.NEXTAUTH_SECRET,
     });
 
-    // If already logged in, redirect to history
+    // If already logged in, redirect to donate/history
     if (token) {
       return NextResponse.redirect(new URL("/donate/history", request.url));
     }

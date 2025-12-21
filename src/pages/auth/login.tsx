@@ -1,208 +1,164 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, EyeOff, Lock, Mail, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
 
+  const callbackUrl = searchParams.get("callbackUrl") || "/donate/history";
+  const error = searchParams.get("error");
+
+  // Check if user is already logged in
   useEffect(() => {
-    // Check if user is already logged in
-    getSession().then((session) => {
-      if (session) {
-        const callbackUrl = searchParams.get("callbackUrl");
-        // Decode callbackUrl if it's encoded
-        const decodedUrl = callbackUrl ? decodeURIComponent(callbackUrl) : null;
-        // Validate URL to prevent open redirect
-        const safeUrl = decodedUrl && decodedUrl.startsWith("/") ? decodedUrl : "/donate/history";
-        router.push(safeUrl);
+    const checkSession = async () => {
+      try {
+        const session = await getSession();
+        if (session) {
+          router.push(callbackUrl);
+        }
+      } catch (error) {
+        console.error("Error checking session:", error);
+      } finally {
+        setIsCheckingSession(false);
       }
-    });
-  }, [router, searchParams]);
+    };
+    checkSession();
+  }, [router, callbackUrl]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    
-    // Basic validation
-    if (!email.trim() || !password.trim()) {
-      setError("Email dan password harus diisi.");
-      return;
+  // Show error message if any
+  useEffect(() => {
+    if (error) {
+      let errorMessage = "Authentication failed";
+      switch (error) {
+        case "CredentialsSignin":
+          errorMessage = "Invalid email or password";
+          break;
+        case "Configuration":
+          errorMessage = "Server configuration error";
+          break;
+        case "AccessDenied":
+          errorMessage = "Access denied";
+          break;
+        default:
+          errorMessage = "An error occurred during authentication";
+      }
+      toast({
+        title: "Login Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      // Clear error from URL
+      router.replace("/auth/login");
     }
+  }, [error, toast, router]);
 
-    setLoading(true);
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
 
     try {
-      // Get and decode callbackUrl
-      const rawCallbackUrl = searchParams.get("callbackUrl");
-      let callbackUrl = "/donate/history";
-      
-      if (rawCallbackUrl) {
-        try {
-          // Decode if encoded
-          const decoded = decodeURIComponent(rawCallbackUrl);
-          // Validate it's a relative path (prevent open redirect)
-          if (decoded.startsWith("/")) {
-            callbackUrl = decoded;
-          }
-        } catch {
-          // If decode fails, use default
-          callbackUrl = "/donate/history";
-        }
-      }
-      
       const result = await signIn("credentials", {
         email: email.trim(),
-        password: password.trim(),
+        password: password,
         redirect: false,
+        callbackUrl: callbackUrl,
       });
 
-      if (result?.ok) {
-        // Login successful - redirect to decoded URL
-        router.push(callbackUrl);
-        return;
-      }
-
-      // Handle errors
       if (result?.error) {
-        if (result.error === "CredentialsSignin") {
-          setError("Email atau password salah. Silakan coba lagi.");
-        } else {
-          setError("Terjadi kesalahan saat login. Silakan coba lagi.");
-        }
-      } else {
-        setError("Terjadi kesalahan saat login. Silakan coba lagi.");
+        toast({
+          title: "Login Failed",
+          description: result.error === "CredentialsSignin" 
+            ? "Invalid email or password" 
+            : "An error occurred. Please try again.",
+          variant: "destructive",
+        });
+      } else if (result?.ok) {
+        toast({
+          title: "Login Successful",
+          description: "Redirecting...",
+        });
+        router.push(callbackUrl);
+        router.refresh();
       }
-    } catch {
-      // Catch any unexpected errors
-      setError("Terjadi kesalahan saat login. Silakan coba lagi.");
+    } catch (error) {
+      console.error("Login error:", error);
+      toast({
+        title: "Login Failed",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
+  if (isCheckingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-md shadow-xl border-0 dark:border dark:border-slate-700">
-        <CardHeader className="space-y-1 text-center pb-4">
-          <div className="flex justify-center mb-4">
-            <div className="rounded-full bg-primary/10 p-3">
-              <Lock className="h-6 w-6 text-primary" />
-            </div>
-          </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            Admin Login
-          </CardTitle>
-          <CardDescription className="text-sm text-muted-foreground">
-            Masuk ke akun admin Anda untuk melanjutkan
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl font-bold text-center">Admin Login</CardTitle>
+          <CardDescription className="text-center">
+            Enter your credentials to access the admin panel
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
-                <p className="text-sm text-destructive font-medium">{error}</p>
-              </div>
-            )}
-
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm font-medium">
-                Email
-              </Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="admin@donate.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
-                  disabled={loading}
-                />
-              </div>
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="admin@donate.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={isLoading}
+                autoComplete="email"
+                autoFocus
+              />
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium">
-                Password
-              </Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  placeholder="Masukkan password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10"
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  tabIndex={-1}
-                  disabled={loading}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={isLoading}
+                autoComplete="current-password"
+              />
             </div>
-
             <Button
               type="submit"
               className="w-full"
-              disabled={loading}
-              size="lg"
+              disabled={isLoading || !email.trim() || !password}
             >
-              {loading ? (
-                <>
-                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
-                  Masuk...
-                </>
-              ) : (
-                <>
-                  <LogIn className="mr-2 h-4 w-4" />
-                  Masuk
-                </>
-              )}
+              {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-xs text-muted-foreground">
-              Gunakan kredensial admin untuk mengakses dashboard
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>

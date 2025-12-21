@@ -1,142 +1,134 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { login } from "@/lib/api";
+import type { JWT } from "next-auth/jwt";
+
+// Get backend API URL from environment variable
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+// Interface for backend login response
+interface BackendLoginResponse {
+  success: boolean;
+  access_token: string;
+  refresh_token: string;
+  user: {
+    id: string;
+    email: string;
+    full_name: string;
+    is_verified: boolean;
+    user_type: string;
+    login_type: string;
+  };
+}
+
+// Interface for backend error response
+interface BackendErrorResponse {
+  success: false;
+  error: string;
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
-      id: "credentials",
-      name: "credentials",
+      name: "Credentials",
       credentials: {
-        email: { label: "Email", type: "email" },
+        email: { label: "Email", type: "email", placeholder: "admin@donate.com" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        try {
-          // Validate credentials
-          if (!credentials?.email || !credentials?.password) {
-            return null;
-          }
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Email and password are required");
+        }
 
-          // Use API client to call backend
-          // login() now returns null on error instead of throwing
-          const authResponse = await login({
-            email: credentials.email,
-            password: credentials.password,
+        try {
+          // Call backend login API
+          const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: credentials.email,
+              password: credentials.password,
+            }),
           });
 
-          // Check if login failed (null response)
-          if (!authResponse) {
-            return null;
+          const data: BackendLoginResponse | BackendErrorResponse = await response.json();
+
+          if (!response.ok || !data.success) {
+            const errorMessage = "error" in data ? data.error : "Invalid email or password";
+            throw new Error(errorMessage);
           }
 
-          // Extract data from response
-          const accessToken = authResponse.access_token;
-          const refreshToken = authResponse.refresh_token;
-          const userData = authResponse.user;
-
-          // Validate required fields
-          if (!accessToken || !userData) {
-            return null;
+          // Return user object with token
+          if ("user" in data && data.user) {
+            return {
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.full_name,
+              accessToken: data.access_token,
+              refreshToken: data.refresh_token,
+              userType: data.user.user_type,
+              isVerified: data.user.is_verified,
+            };
           }
 
-          // Return user object for successful login
-          return {
-            id: userData.id || "",
-            email: userData.email || credentials.email,
-            name: userData.full_name || userData.email?.split("@")[0] || "Admin",
-            image: userData.profile_photo || "",
-            accessToken: accessToken,
-            refreshToken: refreshToken || accessToken + "_refresh",
-            isVerified: userData.is_verified ?? true,
-            userType: userData.user_type || "admin",
-            loginType: userData.login_type || "credential",
-          };
-        } catch {
-          // Catch all errors and return null (never throw)
-          // This should never happen now since login() returns null on error
-          return null;
+          throw new Error("Invalid response from server");
+        } catch (error) {
+          // Log error for debugging (remove in production or use proper logging)
+          console.error("Login error:", error);
+          if (error instanceof Error) {
+            throw error;
+          }
+          throw new Error("Failed to authenticate. Please try again.");
         }
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user, account }) {
-      // Initial sign in - store user data in token
+      // Initial sign in
       if (account && user) {
-        token.sub = user.id;
-        token.accessToken = user.accessToken;
-        token.refreshToken = user.refreshToken;
-        token.isVerified = user.isVerified;
-        token.userType = user.userType;
-        token.loginType = user.loginType;
-        token.image = user.image;
-        token.name = user.name;
-        token.email = user.email;
+        token.accessToken = (user as any).accessToken;
+        token.refreshToken = (user as any).refreshToken;
+        token.userType = (user as any).userType;
+        token.isVerified = (user as any).isVerified;
         token.accessTokenExpires = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
       }
+
+      // Return previous token if the access token has not expired yet
+      if (Date.now() < (token.accessTokenExpires as number)) {
+        return token;
+      }
+
+      // Access token has expired, try to update it (optional: implement refresh logic)
+      // For now, we'll let the token expire and user needs to re-login
       return token;
     },
     async session({ session, token }) {
-      // Add user data to session
-      if (session.user) {
-        session.user.id = token.sub as string;
-        session.user.name = (token.name as string) || session.user.name || "";
-        session.user.email = (token.email as string) || session.user.email || "";
-        session.user.image = (token.image as string) || session.user.image || undefined;
+      // Send properties to the client
+      if (token) {
+        (session as any).accessToken = token.accessToken;
+        (session as any).refreshToken = token.refreshToken;
+        (session as any).userType = token.userType;
+        (session as any).isVerified = token.isVerified;
+        if (session.user) {
+          session.user.id = token.sub || "";
+        }
       }
-      // Add custom fields to session
-      session.accessToken = token.accessToken as string;
-      session.refreshToken = token.refreshToken as string;
-      session.isVerified = token.isVerified as boolean;
-      session.userType = token.userType as string;
-      session.loginType = token.loginType as string;
       return session;
     },
   },
   pages: {
     signIn: "/auth/login",
-    error: "/auth/login",
+    error: "/auth/login", // Error code passed in query string as ?error=
   },
   session: {
     strategy: "jwt",
     maxAge: 7 * 24 * 60 * 60, // 7 days
-    updateAge: 24 * 60 * 60, // Update session every 24 hours
   },
-  jwt: {
-    maxAge: 7 * 24 * 60 * 60, // 7 days
-  },
-  cookies: {
-    sessionToken: {
-      name: `next-auth.session-token`,
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production", // HTTPS only in production
-      },
-    },
-    callbackUrl: {
-      name: `next-auth.callback-url`,
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-      },
-    },
-    csrfToken: {
-      name: `next-auth.csrf-token`,
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-      },
-    },
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-  debug: false,
+  secret: process.env.NEXTAUTH_SECRET || "K1E90c5WRly4i69szH9xjkUF-0rDM-tl3WKA06hMayTBDvuOmjjsj3z_i_f7NIFk",
+  debug: process.env.NODE_ENV === "development",
 };
 
 export default NextAuth(authOptions);
+
