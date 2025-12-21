@@ -3,12 +3,24 @@
 import React, { useState, useEffect } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff, Lock, Mail, LogIn } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -49,68 +61,111 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 py-12 px-4 sm:px-6 lg:px-8">
+      <Card className="w-full max-w-md shadow-xl border-0 dark:border dark:border-slate-700">
+        <CardHeader className="space-y-1 text-center pb-4">
+          <div className="flex justify-center mb-4">
+            <div className="rounded-full bg-primary/10 p-3">
+              <Lock className="h-6 w-6 text-primary" />
+            </div>
+          </div>
+          <CardTitle className="text-2xl font-bold tracking-tight">
             Admin Login
-          </p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
-            </div>
-          )}
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="email" className="sr-only">
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
+          </CardTitle>
+          <CardDescription className="text-sm text-muted-foreground">
+            Masuk ke akun admin Anda untuk melanjutkan
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+                <p className="text-sm text-destructive font-medium">{error}</p>
+              </div>
+            )}
 
-          <div>
-            <button
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-sm font-medium">
+                Email
+              </Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  placeholder="admin@donate.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-sm font-medium">
+                Password
+              </Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  required
+                  placeholder="Masukkan password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10 pr-10"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                  disabled={loading}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <Button
               type="submit"
+              className="w-full"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              size="lg"
             >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
+              {loading ? (
+                <>
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
+                  Masuk...
+                </>
+              ) : (
+                <>
+                  <LogIn className="mr-2 h-4 w-4" />
+                  Masuk
+                </>
+              )}
+            </Button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <p className="text-xs text-muted-foreground">
+              Gunakan kredensial admin untuk mengakses dashboard
+            </p>
           </div>
-        </form>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
