@@ -26,6 +26,8 @@ interface DonationHistory {
   payment?: {
     paymentMethod?: string;
     paymentType?: string;
+    plisioCurrency?: string;
+    plisioSourceAmount?: number;
   };
 }
 
@@ -48,6 +50,8 @@ interface WebSocketMessage {
   createdAt?: string;
   paymentMethod?: string;
   paymentType?: string;
+  plisioCurrency?: string;
+  plisioAmount?: string;
 }
 
 export default function HistoryPage() {
@@ -182,6 +186,8 @@ export default function HistoryPage() {
                       ? {
                           paymentMethod: data.paymentMethod,
                           paymentType: data.paymentType,
+                          plisioCurrency: data.plisioCurrency,
+                          plisioSourceAmount: data.plisioAmount ? parseFloat(data.plisioAmount) : undefined,
                         }
                       : undefined,
                   };
@@ -329,8 +335,17 @@ export default function HistoryPage() {
     });
   };
 
-  const formatAmount = (amount: number): string => {
-    return `Rp${amount.toLocaleString("id-ID")}`;
+  const formatAmount = (donation: DonationHistory): string => {
+    // If crypto payment, format as crypto currency and amount
+    if (donation.payment?.paymentMethod === "crypto" && donation.payment?.plisioCurrency && donation.payment?.plisioSourceAmount !== undefined) {
+      const cryptoAmount = donation.payment.plisioSourceAmount;
+      return `${cryptoAmount.toLocaleString("id-ID", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 8,
+      })} ${donation.payment.plisioCurrency}`;
+    }
+    // Otherwise, format as IDR
+    return `Rp${donation.amount.toLocaleString("id-ID")}`;
   };
 
   // Filter history based on time filter
@@ -537,7 +552,7 @@ export default function HistoryPage() {
                   
                   {/* Amount */}
                   <p className="text-lg font-bold text-gray-900 mb-3">
-                    {formatAmount(donation.amount)}
+                    {formatAmount(donation)}
                   </p>
 
                   {/* Message */}
