@@ -61,69 +61,31 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn() {
-      // Only credentials provider, no Google OAuth
-      return true;
-    },
-    async jwt({ token, user, account, trigger }) {
-      // Initial sign in
+    async jwt({ token, user, account }) {
+      // Initial sign in - store user data in token
       if (account && user) {
-        return {
-          ...token,
-          sub: user.id,
-          accessToken: user.accessToken,
-          refreshToken: user.refreshToken,
-          isVerified: user.isVerified,
-          userType: user.userType,
-          loginType: user.loginType,
-          image: user.image,
-          accessTokenExpires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days (matches backend JWT expiration)
-        };
+        token.sub = user.id;
+        token.accessToken = user.accessToken;
+        token.refreshToken = user.refreshToken;
+        token.isVerified = user.isVerified;
+        token.userType = user.userType;
+        token.loginType = user.loginType;
+        token.image = user.image;
+        token.name = user.name;
+        token.email = user.email;
+        token.accessTokenExpires = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
       }
-
-      // Handle session update trigger (when update() is called)
-      if (trigger === "update" && token.accessToken) {
-        try {
-          // Use API client to fetch updated user data
-          const { getCurrentUser } = await import("@/lib/api");
-          const updatedUser = await getCurrentUser(token.accessToken as string);
-          
-          if (updatedUser) {
-            return {
-              ...token,
-              image: updatedUser.profile_photo || token.image || "",
-              name: updatedUser.full_name || token.name || "",
-            };
-          }
-        } catch {
-          // Continue with existing token if fetch fails
-        }
-      }
-
-      // Return previous token if the access token has not expired yet
-      if (token.accessTokenExpires && Date.now() < (token.accessTokenExpires as number)) {
-        return token;
-      }
-
-      // Access token has expired, try to update it
-      const refreshed = await refreshAccessToken(token);
-      
-      // Ensure all required JWT fields are present
-      return {
-        ...token,
-        ...refreshed,
-        sub: token.sub || "",
-      } as typeof token;
+      return token;
     },
     async session({ session, token }) {
+      // Add user data to session
       if (session.user) {
         session.user.id = token.sub as string;
-        // Prioritize token.image over session.user.image
-        session.user.image = (token.image as string) || session.user.image || undefined;
         session.user.name = (token.name as string) || session.user.name || "";
-        session.user.role = token.userType as string; // Add role alias
-        session.user.username = (token.name as string) || session.user.name; // Add username alias
+        session.user.email = (token.email as string) || session.user.email || "";
+        session.user.image = (token.image as string) || session.user.image || undefined;
       }
+      // Add custom fields to session
       session.accessToken = token.accessToken as string;
       session.refreshToken = token.refreshToken as string;
       session.isVerified = token.isVerified as boolean;
@@ -139,63 +101,42 @@ export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
     maxAge: 7 * 24 * 60 * 60, // 7 days
+    updateAge: 24 * 60 * 60, // Update session every 24 hours
   },
   jwt: {
     maxAge: 7 * 24 * 60 * 60, // 7 days
   },
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production", // HTTPS only in production
+      },
+    },
+    callbackUrl: {
+      name: `next-auth.callback-url`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+    csrfToken: {
+      name: `next-auth.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
   secret: process.env.NEXTAUTH_SECRET,
   debug: false,
 };
-
-async function refreshAccessToken(token: {
-  refreshToken?: string;
-  accessTokenExpires?: number;
-  [key: string]: unknown;
-}) {
-  try {
-    if (!token.refreshToken) {
-      return {
-        ...token,
-        error: "RefreshAccessTokenError",
-      };
-    }
-
-    // Backend might not have refresh token endpoint, so try to refresh
-    // If it fails, return error to force re-login
-    try {
-      const { refreshToken: refreshTokenApi } = await import("@/lib/api");
-      const refreshedTokens = await refreshTokenApi(token.refreshToken as string);
-
-      if (!refreshedTokens || !refreshedTokens.access_token) {
-        return {
-          ...token,
-          error: "RefreshAccessTokenError",
-        };
-      }
-
-      return {
-        ...token,
-        accessToken: refreshedTokens.access_token,
-        accessTokenExpires: Date.now() + (refreshedTokens.expires_in || 7 * 24 * 60 * 60) * 1000,
-        refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
-        isVerified: refreshedTokens.user?.is_verified ?? token.isVerified ?? true,
-        userType: refreshedTokens.user?.user_type ?? token.userType ?? "admin",
-        loginType: refreshedTokens.user?.login_type ?? token.loginType ?? "credential",
-        image: refreshedTokens.user?.profile_photo || token.image || "",
-      };
-    } catch {
-      // If refresh fails, return error to force re-login
-      return {
-        ...token,
-        error: "RefreshAccessTokenError",
-      };
-    }
-  } catch {
-    return {
-      ...token,
-      error: "RefreshAccessTokenError",
-    };
-  }
-}
 
 export default NextAuth(authOptions);
