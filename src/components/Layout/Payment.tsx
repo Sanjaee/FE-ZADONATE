@@ -712,17 +712,17 @@ export default function PaymentDetailPage() {
         {payment.status === "SUCCESS" && (
           <div className={`transition-all duration-500 ${statusChanged && previousStatus === "PENDING" ? "animate-in fade-in slide-in-from-bottom-4" : ""}`}>
             {/* Success Icon & Title */}
-            <div className="flex flex-col items-center justify-center py-6 mb-2">
+            <div className="flex flex-col items-center justify-center py-5">
             <img
                   src="/checklist.gif"
                   alt="Success"
-                  className="w-[200px] mb-5"
+                  className="w-[200px] mb-8"
                 />
               <h2 className="text-2xl font-bold text-black ">Pembayaran Berhasil</h2>
             </div>
 
             {/* Payment Details Card */}
-            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4 mt-4">
+            <div className="bg-white rounded-2xl shadow-xl border p-6 mb-4 mt-4">
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
                   <span className="text-sm text-gray-500">Tanggal</span>
