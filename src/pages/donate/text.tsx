@@ -10,6 +10,10 @@ interface TextMessage {
   message?: string;
   duration?: number; // Display duration in milliseconds (from backend)
   visible?: boolean;
+  paymentMethod?: string; // crypto, bank_transfer, gopay, etc
+  paymentType?: string; // plisio, midtrans
+  plisioCurrency?: string; // BTC, ETH, SOL, etc
+  plisioAmount?: string; // Crypto amount (e.g., "0.001", "0.5")
 }
 
 
@@ -34,6 +38,10 @@ export default function TextPage() {
     donorName: string;
     amount: number;
     message?: string;
+    paymentMethod?: string;
+    paymentType?: string;
+    plisioCurrency?: string;
+    plisioAmount?: string;
   } | null>(null);
   const [currentDonationId, setCurrentDonationId] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -135,6 +143,10 @@ export default function TextPage() {
                     donorName: data.donorName,
                     amount: data.amount,
                     message: message, // Always set message, even if empty string
+                    paymentMethod: data.paymentMethod,
+                    paymentType: data.paymentType,
+                    plisioCurrency: data.plisioCurrency,
+                    plisioAmount: data.plisioAmount,
                   });
                   setCurrentDonationId(data.id);
                   setIsVisible(true);
@@ -455,9 +467,19 @@ export default function TextPage() {
                   {textMessage.donorName}
                 </span>{" "}
                 baru saja memberikan{" "}
-                <span className="text-[#FFB703]">
-                  Rp{textMessage.amount.toLocaleString("id-ID")}
-                </span>
+                {textMessage.paymentMethod === "crypto" && textMessage.plisioCurrency && textMessage.plisioAmount ? (
+                  <span className="text-[#FFB703]">
+                    {parseFloat(textMessage.plisioAmount).toLocaleString("id-ID", {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 8,
+                    })}{" "}
+                    {textMessage.plisioCurrency}
+                  </span>
+                ) : (
+                  <span className="text-[#FFB703]">
+                    Rp{textMessage.amount.toLocaleString("id-ID")}
+                  </span>
+                )}
               </div>
 
               {/* Line 2: Optional message - moved down */}
