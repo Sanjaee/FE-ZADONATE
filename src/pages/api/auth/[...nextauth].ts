@@ -12,7 +12,7 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         try {
-          // Regular login with email/password
+          // Validate credentials
           if (!credentials?.email || !credentials?.password) {
             return null;
           }
@@ -20,51 +20,73 @@ export const authOptions: NextAuthOptions = {
           // Get backend URL from environment variables
           const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
           
-          // Call backend login endpoint directly
-          const loginResponse = await fetch(`${backendUrl}/api/v1/auth/login`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              email: credentials.email,
-              password: credentials.password,
-            }),
-          });
+          // Call backend login endpoint
+          let loginResponse: Response;
+          try {
+            loginResponse = await fetch(`${backendUrl}/api/v1/auth/login`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                email: credentials.email,
+                password: credentials.password,
+              }),
+            });
+          } catch (fetchError) {
+            // Network error or backend unreachable
+            return null;
+          }
 
-          // If login failed, return null (NextAuth will set result.error = "CredentialsSignin")
+          // Check if response is OK
           if (!loginResponse.ok) {
             return null;
           }
 
-          // Backend returns: { success, access_token, refresh_token, user }
-          const authResponse = await loginResponse.json();
+          // Check Content-Type before parsing JSON
+          const contentType = loginResponse.headers.get("content-type");
+          if (!contentType || !contentType.includes("application/json")) {
+            // Backend returned non-JSON response (HTML error page, etc.)
+            return null;
+          }
 
-          // Handle backend response structure
+          // Parse JSON response safely
+          let authResponse: any;
+          try {
+            authResponse = await loginResponse.json();
+          } catch (jsonError) {
+            // Response is not valid JSON
+            return null;
+          }
+
+          // Validate response structure
+          if (!authResponse || typeof authResponse !== "object") {
+            return null;
+          }
+
           const accessToken = authResponse.access_token;
           const refreshToken = authResponse.refresh_token;
           const userData = authResponse.user;
 
-          // If response is invalid, return null
-          if (!accessToken || !userData) {
+          // Validate required fields
+          if (!accessToken || typeof accessToken !== "string" || !userData || typeof userData !== "object") {
             return null;
           }
 
           // Return user object for successful login
           return {
-            id: userData.id,
-            email: userData.email,
-            name: userData.full_name || userData.email.split("@")[0] || "Admin",
+            id: userData.id || "",
+            email: userData.email || credentials.email,
+            name: userData.full_name || userData.email?.split("@")[0] || "Admin",
             image: userData.profile_photo || "",
             accessToken: accessToken,
-            refreshToken: refreshToken,
+            refreshToken: refreshToken || accessToken + "_refresh",
             isVerified: userData.is_verified ?? true,
             userType: userData.user_type || "admin",
             loginType: userData.login_type || "credential",
           };
         } catch (error) {
-          // Never throw errors in authorize() - always return null on failure
-          // NextAuth will handle the error and set result.error appropriately
+          // Catch all errors and return null (never throw)
           return null;
         }
       },

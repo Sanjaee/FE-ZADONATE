@@ -37,34 +37,45 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    
+    // Basic validation
+    if (!email.trim() || !password.trim()) {
+      setError("Email dan password harus diisi.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const callbackUrl = searchParams.get("callbackUrl") || "/donate/history";
+      
       const result = await signIn("credentials", {
-        email,
-        password,
+        email: email.trim(),
+        password: password.trim(),
         redirect: false,
         callbackUrl,
       });
 
+      if (result?.ok) {
+        // Login successful - redirect
+        router.push(callbackUrl);
+        return;
+      }
+
+      // Handle errors
       if (result?.error) {
-        // Handle different error types with user-friendly messages
         if (result.error === "CredentialsSignin") {
           setError("Email atau password salah. Silakan coba lagi.");
         } else {
-          setError(result.error);
+          setError("Terjadi kesalahan saat login. Silakan coba lagi.");
         }
-        setLoading(false);
-      } else if (result?.ok) {
-        router.push(callbackUrl);
       } else {
-        // Fallback if no error but also not ok
         setError("Terjadi kesalahan saat login. Silakan coba lagi.");
-        setLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+    } catch {
+      // Catch any unexpected errors
+      setError("Terjadi kesalahan saat login. Silakan coba lagi.");
+    } finally {
       setLoading(false);
     }
   };
