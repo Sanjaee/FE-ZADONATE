@@ -138,10 +138,11 @@ async function apiRequest<T>(
 
 /**
  * Login API - Authenticate user with email and password
+ * Returns null on error (for NextAuth compatibility)
  */
 export async function login(
   credentials: LoginRequest
-): Promise<LoginResponse> {
+): Promise<LoginResponse | null> {
   try {
     const response = await apiRequest<LoginResponse>("/api/v1/auth/login", {
       method: "POST",
@@ -160,16 +161,15 @@ export async function login(
       !response.user ||
       typeof response.user !== "object"
     ) {
-      throw {
-        message: "Invalid response from server",
-        status: 500,
-      } as ApiError;
+      // Return null instead of throwing (for NextAuth compatibility)
+      return null;
     }
 
     return response;
-  } catch (error) {
-    // Re-throw with proper error handling
-    throw error as ApiError;
+  } catch {
+    // Return null on any error (for NextAuth compatibility)
+    // NextAuth authorize() should never receive thrown errors
+    return null;
   }
 }
 

@@ -19,15 +19,26 @@ export const authOptions: NextAuthOptions = {
           }
 
           // Use API client to call backend
+          // login() now returns null on error instead of throwing
           const authResponse = await login({
             email: credentials.email,
             password: credentials.password,
           });
 
+          // Check if login failed (null response)
+          if (!authResponse) {
+            return null;
+          }
+
           // Extract data from response
           const accessToken = authResponse.access_token;
           const refreshToken = authResponse.refresh_token;
           const userData = authResponse.user;
+
+          // Validate required fields
+          if (!accessToken || !userData) {
+            return null;
+          }
 
           // Return user object for successful login
           return {
@@ -43,7 +54,7 @@ export const authOptions: NextAuthOptions = {
           };
         } catch {
           // Catch all errors and return null (never throw)
-          // API client handles all error cases internally
+          // This should never happen now since login() returns null on error
           return null;
         }
       },
