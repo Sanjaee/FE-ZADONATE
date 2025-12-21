@@ -29,7 +29,11 @@ export default function LoginPage() {
     getSession().then((session) => {
       if (session) {
         const callbackUrl = searchParams.get("callbackUrl");
-        router.push(callbackUrl || "/donate/history");
+        // Decode callbackUrl if it's encoded
+        const decodedUrl = callbackUrl ? decodeURIComponent(callbackUrl) : null;
+        // Validate URL to prevent open redirect
+        const safeUrl = decodedUrl && decodedUrl.startsWith("/") ? decodedUrl : "/donate/history";
+        router.push(safeUrl);
       }
     });
   }, [router, searchParams]);
@@ -47,17 +51,32 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const callbackUrl = searchParams.get("callbackUrl") || "/donate/history";
+      // Get and decode callbackUrl
+      const rawCallbackUrl = searchParams.get("callbackUrl");
+      let callbackUrl = "/donate/history";
+      
+      if (rawCallbackUrl) {
+        try {
+          // Decode if encoded
+          const decoded = decodeURIComponent(rawCallbackUrl);
+          // Validate it's a relative path (prevent open redirect)
+          if (decoded.startsWith("/")) {
+            callbackUrl = decoded;
+          }
+        } catch {
+          // If decode fails, use default
+          callbackUrl = "/donate/history";
+        }
+      }
       
       const result = await signIn("credentials", {
         email: email.trim(),
         password: password.trim(),
         redirect: false,
-        callbackUrl,
       });
 
       if (result?.ok) {
-        // Login successful - redirect
+        // Login successful - redirect to decoded URL
         router.push(callbackUrl);
         return;
       }

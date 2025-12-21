@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Routes that require authentication (admin routes)
-  const protectedRoutes = ["/history", "/donate/history"];
+  const protectedRoutes = ["/donate/history", "/history"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
@@ -15,32 +15,37 @@ export async function middleware(request: NextRequest) {
   const authRoutes = ["/auth/login"];
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
 
+  // Check protected routes
   if (isProtectedRoute) {
     const token = await getToken({
       req: request,
       secret: process.env.NEXTAUTH_SECRET,
     });
 
-    // If no session, redirect to login
+    // If no session, redirect to login with callback URL
     if (!token) {
-      const url = new URL("/auth/login", request.url);
-      url.searchParams.set("callbackUrl", encodeURIComponent(pathname));
-      return NextResponse.redirect(url);
+      const loginUrl = new URL("/auth/login", request.url);
+      // Only encode once - pathname is already a valid path
+      loginUrl.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(loginUrl);
     }
 
     // Check if user is admin
-    if (token.userType !== "admin" && token.role !== "admin") {
+    const userType = token.userType || token.role;
+    if (userType !== "admin") {
       // Redirect non-admin to home page
       return NextResponse.redirect(new URL("/", request.url));
     }
   }
 
+  // Check auth routes (login page)
   if (isAuthRoute) {
     const token = await getToken({
       req: request,
       secret: process.env.NEXTAUTH_SECRET,
     });
 
+    // If already logged in, redirect to history
     if (token) {
       return NextResponse.redirect(new URL("/donate/history", request.url));
     }
