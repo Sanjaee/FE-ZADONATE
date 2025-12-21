@@ -1,5 +1,6 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import { login } from "@/lib/api";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -17,61 +18,16 @@ export const authOptions: NextAuthOptions = {
             return null;
           }
 
-          // Get backend URL from environment variables
-          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
-          
-          // Call backend login endpoint
-          let loginResponse: Response;
-          try {
-            loginResponse = await fetch(`${backendUrl}/api/v1/auth/login`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                email: credentials.email,
-                password: credentials.password,
-              }),
-            });
-          } catch (fetchError) {
-            // Network error or backend unreachable
-            return null;
-          }
+          // Use API client to call backend
+          const authResponse = await login({
+            email: credentials.email,
+            password: credentials.password,
+          });
 
-          // Check if response is OK
-          if (!loginResponse.ok) {
-            return null;
-          }
-
-          // Check Content-Type before parsing JSON
-          const contentType = loginResponse.headers.get("content-type");
-          if (!contentType || !contentType.includes("application/json")) {
-            // Backend returned non-JSON response (HTML error page, etc.)
-            return null;
-          }
-
-          // Parse JSON response safely
-          let authResponse: any;
-          try {
-            authResponse = await loginResponse.json();
-          } catch (jsonError) {
-            // Response is not valid JSON
-            return null;
-          }
-
-          // Validate response structure
-          if (!authResponse || typeof authResponse !== "object") {
-            return null;
-          }
-
+          // Extract data from response
           const accessToken = authResponse.access_token;
           const refreshToken = authResponse.refresh_token;
           const userData = authResponse.user;
-
-          // Validate required fields
-          if (!accessToken || typeof accessToken !== "string" || !userData || typeof userData !== "object") {
-            return null;
-          }
 
           // Return user object for successful login
           return {
@@ -85,8 +41,9 @@ export const authOptions: NextAuthOptions = {
             userType: userData.user_type || "admin",
             loginType: userData.login_type || "credential",
           };
-        } catch (error) {
+        } catch {
           // Catch all errors and return null (never throw)
+          // API client handles all error cases internally
           return null;
         }
       },
@@ -116,25 +73,16 @@ export const authOptions: NextAuthOptions = {
       // Handle session update trigger (when update() is called)
       if (trigger === "update" && token.accessToken) {
         try {
-          // Fetch updated user data from backend
-          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://zoom.zacloth.com";
-          const userResponse = await fetch(`${backendUrl}/api/v1/auth/me`, {
-            headers: {
-              Authorization: `Bearer ${token.accessToken}`,
-            },
-          });
-
-          if (userResponse.ok) {
-            const userData = await userResponse.json();
-            const updatedUser = userData.data?.user || userData.user;
-            if (updatedUser) {
-              return {
-                ...token,
-                image: updatedUser.profile_photo || updatedUser.profilePic || token.image,
-                // Update name/username if changed
-                name: updatedUser.username || updatedUser.full_name || token.name,
-              };
-            }
+          // Use API client to fetch updated user data
+          const { getCurrentUser } = await import("@/lib/api");
+          const updatedUser = await getCurrentUser(token.accessToken as string);
+          
+          if (updatedUser) {
+            return {
+              ...token,
+              image: updatedUser.profile_photo || token.image || "",
+              name: updatedUser.full_name || token.name || "",
+            };
           }
         } catch {
           // Continue with existing token if fetch fails
@@ -204,27 +152,8 @@ async function refreshAccessToken(token: {
     // Backend might not have refresh token endpoint, so try to refresh
     // If it fails, return error to force re-login
     try {
-      const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
-      
-      // Try to refresh token (if endpoint exists)
-      const refreshResponse = await fetch(`${backendUrl}/api/v1/auth/refresh-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          refresh_token: token.refreshToken,
-        }),
-      });
-
-      if (!refreshResponse.ok) {
-        return {
-          ...token,
-          error: "RefreshAccessTokenError",
-        };
-      }
-
-      const refreshedTokens = await refreshResponse.json();
+      const { refreshToken: refreshTokenApi } = await import("@/lib/api");
+      const refreshedTokens = await refreshTokenApi(token.refreshToken as string);
 
       if (!refreshedTokens || !refreshedTokens.access_token) {
         return {
