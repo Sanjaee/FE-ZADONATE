@@ -32,10 +32,9 @@ export const authOptions: NextAuthOptions = {
             }),
           });
 
+          // If login failed, return null (NextAuth will set result.error = "CredentialsSignin")
           if (!loginResponse.ok) {
-            const errorData = await loginResponse.json().catch(() => ({}));
-            const errorMessage = errorData.error || "Invalid email or password";
-            throw new Error(errorMessage);
+            return null;
           }
 
           // Backend returns: { success, access_token, refresh_token, user }
@@ -46,14 +45,16 @@ export const authOptions: NextAuthOptions = {
           const refreshToken = authResponse.refresh_token;
           const userData = authResponse.user;
 
+          // If response is invalid, return null
           if (!accessToken || !userData) {
-            throw new Error("Invalid response from server");
+            return null;
           }
 
+          // Return user object for successful login
           return {
             id: userData.id,
             email: userData.email,
-            name: userData.full_name || userData.email.split("@")[0],
+            name: userData.full_name || userData.email.split("@")[0] || "Admin",
             image: userData.profile_photo || "",
             accessToken: accessToken,
             refreshToken: refreshToken,
@@ -62,13 +63,8 @@ export const authOptions: NextAuthOptions = {
             loginType: userData.login_type || "credential",
           };
         } catch (error) {
-          // Check if it's a specific error from our backend and throw it
-          if (error instanceof Error) {
-            // Pass through the specific error message from our backend
-            // Frontend will catch and display in toast
-            throw error;
-          }
-
+          // Never throw errors in authorize() - always return null on failure
+          // NextAuth will handle the error and set result.error appropriately
           return null;
         }
       },

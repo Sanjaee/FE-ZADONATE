@@ -49,10 +49,19 @@ export default function LoginPage() {
       });
 
       if (result?.error) {
-        setError(result.error);
+        // Handle different error types with user-friendly messages
+        if (result.error === "CredentialsSignin") {
+          setError("Email atau password salah. Silakan coba lagi.");
+        } else {
+          setError(result.error);
+        }
         setLoading(false);
       } else if (result?.ok) {
         router.push(callbackUrl);
+      } else {
+        // Fallback if no error but also not ok
+        setError("Terjadi kesalahan saat login. Silakan coba lagi.");
+        setLoading(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
