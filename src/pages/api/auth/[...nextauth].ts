@@ -1,11 +1,6 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
-// Validate required environment variables
-if (!process.env.NEXTAUTH_SECRET) {
-  console.error("⚠️ NEXTAUTH_SECRET is not set. Please set it in your environment variables.");
-}
-
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -17,246 +12,147 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         try {
+          // Regular login with email/password
           if (!credentials?.email || !credentials?.password) {
             return null;
           }
 
-          // Call backend login API
-          // Use BACKEND_URL for server-side (NextAuth runs on server), NEXT_PUBLIC_API_URL as fallback
-          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "https://api.zascript.com";
-          const loginUrl = `${backendUrl}/api/v1/auth/login`;
+          // Get backend URL from environment variables
+          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
           
-          console.log("🔐 Attempting login to:", loginUrl);
-          console.log("🔐 Backend URL env:", {
-            BACKEND_URL: process.env.BACKEND_URL || "not set",
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "not set",
-            NODE_ENV: process.env.NODE_ENV,
-            FINAL_BACKEND_URL: backendUrl,
+          // Call backend login endpoint directly
+          const loginResponse = await fetch(`${backendUrl}/api/v1/auth/login`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: credentials.email,
+              password: credentials.password,
+            }),
           });
-          
-          let response: Response;
-          try {
-            response = await fetch(loginUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                email: credentials.email,
-                password: credentials.password,
-              }),
-            });
-          } catch (fetchError) {
-            console.error("🔐 Fetch error:", fetchError);
-            const errorMessage = fetchError instanceof Error ? fetchError.message : "Unknown fetch error";
-            
-            // Check if it's a network error
-            if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
-              console.error(`🔐 Cannot connect to backend at ${backendUrl}. Please check BACKEND_URL environment variable.`);
-              // Return null instead of throwing to prevent 500 error
-              return null;
-            }
-            
-            console.error(`🔐 Network error: ${errorMessage}. Please check backend URL configuration.`);
-            // Return null instead of throwing to prevent 500 error
-            return null;
-          }
-          
-          console.log("🔐 Login response status:", response.status, response.statusText);
-          
-          // Get response text first to check content type
-          const responseText = await response.text();
-          const contentType = response.headers.get("content-type") || "";
-          
-          console.log("🔐 Response content-type:", contentType);
-          console.log("🔐 Response text preview:", responseText.substring(0, 300));
-          
-          // Check if response is HTML error page (starts with "Internal Server Error" or HTML tags)
-          const trimmedResponse = responseText.trim();
-          if (trimmedResponse.startsWith("Internal Server Error") || 
-              trimmedResponse.startsWith("<!DOCTYPE") || 
-              trimmedResponse.startsWith("<html") ||
-              contentType.includes("text/html")) {
-            console.error("🔐 Backend returned HTML error page instead of JSON");
-            console.error("🔐 Full response:", responseText.substring(0, 500));
-            // Return null instead of throwing to prevent 500 error
-            return null;
-          }
-          
-          if (!response.ok) {
-            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            
-            // Try to parse as JSON if content-type indicates JSON
-            if (contentType.includes("application/json")) {
-              try {
-                const errorData = JSON.parse(responseText);
-                errorMessage = errorData.error || errorMessage;
-              } catch (e) {
-                console.error("🔐 Failed to parse error JSON:", e);
-                errorMessage = `Backend returned non-JSON error. Status: ${response.status}`;
-              }
-            } else {
-              // If not JSON, it's probably HTML error page or plain text
-              console.error("🔐 Backend returned non-JSON response");
-              errorMessage = `Backend error (${response.status}). Please check backend URL configuration.`;
-            }
-            
-            console.error("🔐 Login failed:", errorMessage);
-            // Return null instead of throwing to prevent 500 error
-            return null;
+
+          if (!loginResponse.ok) {
+            const errorData = await loginResponse.json().catch(() => ({}));
+            const errorMessage = errorData.error || "Invalid email or password";
+            throw new Error(errorMessage);
           }
 
-          // Validate content type before parsing
-          if (!contentType.includes("application/json")) {
-            console.error("🔐 Backend returned non-JSON response for successful request");
-            console.error("🔐 Content-Type:", contentType);
-            console.error("🔐 Response text:", responseText.substring(0, 300));
-            // Return null instead of throwing
-            return null;
+          // Backend returns: { success, access_token, refresh_token, user }
+          const authResponse = await loginResponse.json();
+
+          // Handle backend response structure
+          const accessToken = authResponse.access_token;
+          const refreshToken = authResponse.refresh_token;
+          const userData = authResponse.user;
+
+          if (!accessToken || !userData) {
+            throw new Error("Invalid response from server");
           }
 
-          // Parse JSON response
-          let authResponse;
-          try {
-            authResponse = JSON.parse(responseText);
-          } catch (e) {
-            console.error("🔐 Failed to parse response JSON:", e);
-            console.error("🔐 Response text:", responseText);
-            // Return null instead of throwing
-            return null;
-          }
-
-          if (!authResponse.success) {
-            console.error("🔐 Login failed - backend returned success: false", authResponse.error || "Login failed");
-            // Return null instead of throwing to prevent 500 error
-            return null;
-          }
-
-          // Validate required fields
-          if (!authResponse.user || !authResponse.user.id || !authResponse.access_token) {
-            console.error("🔐 Invalid response format - missing required fields:", {
-              hasUser: !!authResponse.user,
-              hasUserId: !!authResponse.user?.id,
-              hasAccessToken: !!authResponse.access_token,
-            });
-            // Return null instead of throwing to prevent 500 error
-            return null;
-          }
-
-          const userData = {
-            id: authResponse.user.id,
-            email: authResponse.user.email || credentials.email,
-            name: authResponse.user.full_name || "Admin",
-            image: "",
-            accessToken: authResponse.access_token,
-            refreshToken: authResponse.refresh_token || authResponse.access_token + "_refresh",
-            isVerified: authResponse.user.is_verified !== undefined ? authResponse.user.is_verified : true,
-            userType: authResponse.user.user_type || "admin",
-            loginType: authResponse.user.login_type || "credential",
-          };
-
-          console.log("🔐 Login successful, user data:", {
+          return {
             id: userData.id,
             email: userData.email,
-            hasAccessToken: !!userData.accessToken,
-          });
-
-          return userData;
+            name: userData.full_name || userData.email.split("@")[0],
+            image: userData.profile_photo || "",
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            isVerified: userData.is_verified ?? true,
+            userType: userData.user_type || "admin",
+            loginType: userData.login_type || "credential",
+          };
         } catch (error) {
-          console.error("🔐 Authentication error:", error);
-          console.error("🔐 Error stack:", error instanceof Error ? error.stack : "No stack trace");
-          
-          // Don't throw error - return null to let NextAuth handle it gracefully
-          // Throwing error causes "Callback for provider type credentials not supported"
+          // Check if it's a specific error from our backend and throw it
           if (error instanceof Error) {
-            // Log the error for debugging
-            let errorMessage = error.message || "Login failed. Please check your credentials and backend configuration.";
-            
-            // Provide more specific error messages
-            if (errorMessage.includes("Cannot connect to backend") || errorMessage.includes("Network error")) {
-              errorMessage = `Backend connection failed. Please ensure BACKEND_URL is configured correctly in environment variables.`;
-            }
-            
-            console.error("🔐 Returning null due to error:", errorMessage);
+            // Pass through the specific error message from our backend
+            // Frontend will catch and display in toast
+            throw error;
           }
-          
-          // Return null instead of throwing - this allows NextAuth to return proper error
+
           return null;
         }
       },
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      try {
-        // For credentials provider, always allow sign in if user object exists
-        if (account?.provider === "credentials") {
-          if (user) {
-            console.log("🔐 SignIn callback - credentials provider, user exists");
-            return true;
-          }
-          // If no user, deny sign in
-          console.log("🔐 SignIn callback - credentials provider, no user object");
-          return false;
-        }
-        // For other providers, allow sign in
-        return true;
-      } catch (error) {
-        console.error("🔐 SignIn callback error:", error);
-        return false;
-      }
+    async signIn() {
+      // Only credentials provider, no Google OAuth
+      return true;
     },
-    async jwt({ token, user }) {
-      try {
-        // Initial sign in
-        if (user) {
-          return {
-            ...token,
-            sub: user.id,
-            accessToken: user.accessToken,
-            refreshToken: user.refreshToken,
-            isVerified: user.isVerified,
-            userType: user.userType,
-            loginType: user.loginType,
-            image: user.image,
-          };
+    async jwt({ token, user, account, trigger }) {
+      // Initial sign in
+      if (account && user) {
+        return {
+          ...token,
+          sub: user.id,
+          accessToken: user.accessToken,
+          refreshToken: user.refreshToken,
+          isVerified: user.isVerified,
+          userType: user.userType,
+          loginType: user.loginType,
+          image: user.image,
+          accessTokenExpires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days (matches backend JWT expiration)
+        };
+      }
+
+      // Handle session update trigger (when update() is called)
+      if (trigger === "update" && token.accessToken) {
+        try {
+          // Fetch updated user data from backend
+          const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://zoom.zacloth.com";
+          const userResponse = await fetch(`${backendUrl}/api/v1/auth/me`, {
+            headers: {
+              Authorization: `Bearer ${token.accessToken}`,
+            },
+          });
+
+          if (userResponse.ok) {
+            const userData = await userResponse.json();
+            const updatedUser = userData.data?.user || userData.user;
+            if (updatedUser) {
+              return {
+                ...token,
+                image: updatedUser.profile_photo || updatedUser.profilePic || token.image,
+                // Update name/username if changed
+                name: updatedUser.username || updatedUser.full_name || token.name,
+              };
+            }
+          }
+        } catch {
+          // Continue with existing token if fetch fails
         }
-        return token;
-      } catch (error) {
-        console.error("🔐 JWT callback error:", error);
-        // Return token even if there's an error to prevent 500
+      }
+
+      // Return previous token if the access token has not expired yet
+      if (token.accessTokenExpires && Date.now() < (token.accessTokenExpires as number)) {
         return token;
       }
+
+      // Access token has expired, try to update it
+      const refreshed = await refreshAccessToken(token);
+      
+      // Ensure all required JWT fields are present
+      return {
+        ...token,
+        ...refreshed,
+        sub: token.sub || "",
+      } as typeof token;
     },
     async session({ session, token }) {
-      try {
-        if (session.user) {
-          session.user.id = (token.sub as string) || "";
-          // Prioritize token.image over session.user.image
-          session.user.image = (token.image as string) || session.user.image || undefined;
-          session.user.name = (token.name as string) || session.user.name || "";
-          session.user.role = (token.userType as string) || ""; // Add role alias
-          session.user.username = (token.name as string) || session.user.name || ""; // Add username alias
-        }
-        session.accessToken = (token.accessToken as string) || "";
-        session.refreshToken = (token.refreshToken as string) || "";
-        session.isVerified = (token.isVerified as boolean) || false;
-        session.userType = (token.userType as string) || "";
-        session.loginType = (token.loginType as string) || "";
-        return session;
-      } catch (error) {
-        console.error("🔐 Session callback error:", error);
-        console.error("🔐 Session callback error stack:", error instanceof Error ? error.stack : "No stack");
-        // Don't throw - return session with available data to prevent 500 error
-        return session;
+      if (session.user) {
+        session.user.id = token.sub as string;
+        // Prioritize token.image over session.user.image
+        session.user.image = (token.image as string) || session.user.image || undefined;
+        session.user.name = (token.name as string) || session.user.name || "";
+        session.user.role = token.userType as string; // Add role alias
+        session.user.username = (token.name as string) || session.user.name; // Add username alias
       }
-    },
-    async redirect({ url, baseUrl }) {
-      // Allows relative callback URLs
-      if (url.startsWith("/")) return `${baseUrl}${url}`;
-      // Allows callback URLs on the same origin
-      if (new URL(url).origin === baseUrl) return url;
-      return baseUrl + "/donate/history";
+      session.accessToken = token.accessToken as string;
+      session.refreshToken = token.refreshToken as string;
+      session.isVerified = token.isVerified as boolean;
+      session.userType = token.userType as string;
+      session.loginType = token.loginType as string;
+      return session;
     },
   },
   pages: {
@@ -270,31 +166,78 @@ export const authOptions: NextAuthOptions = {
   jwt: {
     maxAge: 7 * 24 * 60 * 60, // 7 days
   },
-  secret: process.env.NEXTAUTH_SECRET || "K1E90c5WRly4i69szH9xjkUF-0rDM-tl3WKA06hMayTBDvuOmjjsj3z_i_f7NIFk",
-  debug: process.env.NODE_ENV === "development",
-  // Ensure NEXTAUTH_URL is set for production
-  ...(process.env.NEXTAUTH_URL && { url: process.env.NEXTAUTH_URL }),
-  events: {
-    async signIn({ user, account }) {
-      console.log("🔐 SignIn event triggered:", { userId: user?.id, provider: account?.provider });
-    },
-    async signOut() {
-      console.log("🔐 SignOut event triggered");
-    },
-    async createUser({ user }) {
-      console.log("🔐 CreateUser event triggered:", { userId: user.id });
-    },
-    async updateUser({ user }) {
-      console.log("🔐 UpdateUser event triggered:", { userId: user.id });
-    },
-    async linkAccount({ user }) {
-      console.log("🔐 LinkAccount event triggered:", { userId: user.id });
-    },
-    async session() {
-      console.log("🔐 Session event triggered");
-    },
-  },
+  secret: process.env.NEXTAUTH_SECRET,
+  debug: false,
 };
 
+async function refreshAccessToken(token: {
+  refreshToken?: string;
+  accessTokenExpires?: number;
+  [key: string]: unknown;
+}) {
+  try {
+    if (!token.refreshToken) {
+      return {
+        ...token,
+        error: "RefreshAccessTokenError",
+      };
+    }
+
+    // Backend might not have refresh token endpoint, so try to refresh
+    // If it fails, return error to force re-login
+    try {
+      const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
+      
+      // Try to refresh token (if endpoint exists)
+      const refreshResponse = await fetch(`${backendUrl}/api/v1/auth/refresh-token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          refresh_token: token.refreshToken,
+        }),
+      });
+
+      if (!refreshResponse.ok) {
+        return {
+          ...token,
+          error: "RefreshAccessTokenError",
+        };
+      }
+
+      const refreshedTokens = await refreshResponse.json();
+
+      if (!refreshedTokens || !refreshedTokens.access_token) {
+        return {
+          ...token,
+          error: "RefreshAccessTokenError",
+        };
+      }
+
+      return {
+        ...token,
+        accessToken: refreshedTokens.access_token,
+        accessTokenExpires: Date.now() + (refreshedTokens.expires_in || 7 * 24 * 60 * 60) * 1000,
+        refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
+        isVerified: refreshedTokens.user?.is_verified ?? token.isVerified ?? true,
+        userType: refreshedTokens.user?.user_type ?? token.userType ?? "admin",
+        loginType: refreshedTokens.user?.login_type ?? token.loginType ?? "credential",
+        image: refreshedTokens.user?.profile_photo || token.image || "",
+      };
+    } catch {
+      // If refresh fails, return error to force re-login
+      return {
+        ...token,
+        error: "RefreshAccessTokenError",
+      };
+    }
+  } catch {
+    return {
+      ...token,
+      error: "RefreshAccessTokenError",
+    };
+  }
+}
 
 export default NextAuth(authOptions);
