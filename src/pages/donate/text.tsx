@@ -228,9 +228,43 @@ export default function TextPage() {
                 if (data.type === "visibility") {
                   // Handle visibility for current donation
                   if (data.id && data.id === currentDonationId) {
-                    setIsVisible(data.visible ?? true);
-                    if (data.visible) {
+                    if (data.visible === false) {
+                      // Server sent visibility false - this means donation duration ended on server
+                      // Clear everything immediately (donation completed server-side)
+                      console.log("⏰ Server signaled text donation ended (ID: %s), clearing all state", data.id);
+                      
+                      // Stop audio if playing
+                      if (audioRef.current) {
+                        try {
+                          audioRef.current.pause();
+                          audioRef.current.currentTime = 0;
+                        } catch (e) {
+                          console.warn("Error stopping audio:", e);
+                        }
+                      }
+                      
+                      // Clear all timers
+                      if (progressIntervalRef.current) {
+                        clearInterval(progressIntervalRef.current);
+                        progressIntervalRef.current = null;
+                      }
+                      
+                      // Clear all state
+                      setTextMessage(null);
+                      setCurrentDonationId(null);
+                      setIsVisible(true);
+                      setRemainingTime(0);
+                      setTotalDuration(0);
+                      pauseStartTimeRef.current = null;
+                      
+                      // Clear text state ref
+                      textStateRef.current = {
+                        textMessage: null,
+                        remainingTime: 0,
+                      };
+                    } else {
                       // Resumed - adjust remaining time if was paused
+                      setIsVisible(true);
                       if (pauseStartTimeRef.current !== null) {
                         const pauseDuration = Date.now() - pauseStartTimeRef.current;
                         setRemainingTime((prev) => prev + pauseDuration);
@@ -242,14 +276,10 @@ export default function TextPage() {
                           console.warn("Failed to resume BGM:", err);
                         });
                       }
-                    } else {
-                      // Paused - record pause start time
-                      pauseStartTimeRef.current = Date.now();
-                      // Pause BGM
-                      if (audioRef.current) {
-                        audioRef.current.pause();
-                      }
                     }
+                  } else if (data.visible === false && currentDonationId === null) {
+                    // Visibility false for unknown donation - might be cleanup, just hide
+                    setIsVisible(false);
                   }
                 }
               } catch {
