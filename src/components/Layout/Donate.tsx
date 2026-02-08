@@ -177,6 +177,8 @@ export default function DonatePage() {
   const [formattedAmount, setFormattedAmount] = useState<string>(""); // For non-crypto: formatted Rupiah with dots (e.g., "50.000")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [testHitLoading, setTestHitLoading] = useState(false);
+  const [testHitMessage, setTestHitMessage] = useState<string | null>(null);
   const [formData, setFormData] = useState<CreatePaymentRequest>({
     donorName: "",
     donorEmail: "",
@@ -190,6 +192,26 @@ export default function DonatePage() {
   });
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+  // Tes hit: trigger dummy media share (1k, YouTube) untuk cek overlay /donate/gif
+  const handleTestHit = async () => {
+    setTestHitMessage(null);
+    setTestHitLoading(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/test-media-share`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setTestHitMessage("Tes hit terkirim! Buka /donate/gif untuk lihat media share.");
+        setTimeout(() => setTestHitMessage(null), 4000);
+      } else {
+        setTestHitMessage(data?.error || "Gagal mengirim tes hit");
+      }
+    } catch {
+      setTestHitMessage("Gagal koneksi ke backend");
+    } finally {
+      setTestHitLoading(false);
+    }
+  };
 
   // Reset USD amount when switching payment method
   useEffect(() => {
@@ -522,10 +544,27 @@ export default function DonatePage() {
       <div className="max-w-2xl mx-auto">
         <Card>
           <CardHeader>
-            <CardTitle className="text-3xl">Buat Donasi</CardTitle>
-            <CardDescription>
-              Isi formulir di bawah ini untuk membuat donasi
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle className="text-3xl">Buat Donasi</CardTitle>
+                <CardDescription>
+                  Isi formulir di bawah ini untuk membuat donasi
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTestHit}
+                disabled={testHitLoading}
+                className="shrink-0 border-amber-500 text-amber-700 hover:bg-amber-50"
+              >
+                {testHitLoading ? "Mengirim…" : "Tes Hit"}
+              </Button>
+            </div>
+            {testHitMessage && (
+              <p className="text-sm text-muted-foreground mt-1">{testHitMessage}</p>
+            )}
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">

@@ -972,7 +972,7 @@ export default function GiftPage() {
     ? ((totalDuration - remainingTime) / totalDuration) * 100 
     : 0;
 
-  // Completely hidden when no content or when paused
+  // Tanpa konten: tampilkan kosong (overlay hanya untuk tampil media share)
   if (!mediaUrl && !donationMessage) {
     return <div className="hidden" />;
   }
