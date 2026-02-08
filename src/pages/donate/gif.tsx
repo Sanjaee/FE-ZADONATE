@@ -14,6 +14,7 @@ interface DonationMessage {
   startTime?: number; // Start time in seconds for YouTube videos (legacy)
   targetTime?: string | number; // Start time in seconds for YouTube videos (can be string or number)
   duration?: number; // Display duration in milliseconds (from backend)
+  remainingMs?: number; // When reconnecting: remaining time in ms so web only displays, no replay from start
   visible?: boolean;
   paymentMethod?: string; // crypto, bank_transfer, gopay, etc
   paymentType?: string; // plisio, midtrans
@@ -257,22 +258,25 @@ export default function GiftPage() {
                          ? data.message.substring(0, 160) 
                          : data.message;
                        
-                       // Use duration from backend, fallback to calculated if not provided
+                       // Use remainingMs when reconnecting (display runs in background; web only shows current state)
+                       // Otherwise use duration from backend, fallback to calculated
                        const duration = data.duration || calculateDisplayDuration(data.amount);
+                       const effectiveDuration = data.remainingMs != null && data.remainingMs > 0
+                         ? data.remainingMs
+                         : duration;
                        
                        console.log("📥 Received donation:", {
                          id: data.id,
                          donorName: data.donorName,
                          amount: data.amount,
+                         remainingMs: data.remainingMs,
                          durationFromBackend: data.duration,
-                         calculatedDuration: calculateDisplayDuration(data.amount),
-                         finalDuration: duration,
+                         effectiveDuration,
                        });
                        
                        // Set duration FIRST before setting donation message
-                       // This ensures useEffect has the correct duration when it runs
-                       setTotalDuration(duration);
-                       setRemainingTime(duration);
+                       setTotalDuration(effectiveDuration);
+                       setRemainingTime(effectiveDuration);
                        
                        setDonationMessage({
                          id: data.id,
