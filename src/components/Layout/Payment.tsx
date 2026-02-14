@@ -21,6 +21,9 @@ interface Payment {
   vaNumber?: string;
   bankType?: string;
   qrCodeUrl?: string;
+  redirectUrl?: string;
+  maskedCard?: string;
+  cardType?: string;
   expiryTime?: string;
   plisioCurrency?: string;
   plisioPsysCid?: string;
@@ -489,7 +492,9 @@ export default function PaymentDetailPage() {
       // Use Plisio icon URL format: https://plisio.net/img/psys-icon/{CID}.svg
       return `https://plisio.net/img/psys-icon/${cryptoCurrency.toUpperCase()}.svg`;
     }
-    
+    if (method === "credit_card") {
+      return `${baseUrl}/card/credit_card.png`;
+    }
     return null;
   };
 
@@ -597,6 +602,21 @@ export default function PaymentDetailPage() {
                   )}
                 </div>
               )}
+              {payment.paymentMethod === "credit_card" && (
+                <div className="flex items-center gap-2">
+                  {getPaymentMethodLogo(payment.paymentMethod) && (
+                    <img
+                      src={getPaymentMethodLogo(payment.paymentMethod)!}
+                      alt="Credit Card"
+                      className="h-6 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                      }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Merchant Info */}
@@ -633,6 +653,25 @@ export default function PaymentDetailPage() {
                   >
                     {copied === "va" ? "✓ Disalin" : "Salin VA"}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {payment.paymentMethod === "credit_card" && payment.redirectUrl && (
+              <div className="px-6 pb-4">
+                <div className="bg-gray-50 py-6 rounded-xl text-center">
+                  <p className="text-sm text-gray-600 mb-2">Selesaikan verifikasi 3D Secure</p>
+                  {payment.maskedCard && (
+                    <p className="text-black font-mono text-sm mb-3">{payment.maskedCard}</p>
+                  )}
+                  <a
+                    href={payment.redirectUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block mt-2 px-6 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+                  >
+                    Lanjutkan ke 3D Secure →
+                  </a>
                 </div>
               </div>
             )}

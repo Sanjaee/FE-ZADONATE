@@ -48,9 +48,20 @@ interface CreatePaymentRequest {
   startTime?: number;
   message?: string;
   notes?: string;
-  paymentMethod: "bank_transfer" | "gopay" | "qris" | "crypto";
+  paymentMethod: "bank_transfer" | "gopay" | "qris" | "crypto" | "credit_card";
   bank?: string;
   currency?: string;
+  cardTokenId?: string;
+  saveCard?: boolean;
+}
+
+/** Card input for Midtrans getCardToken (tidak dikirim ke backend, hanya untuk dapat token_id) */
+interface CardInputState {
+  cardNumber: string;
+  cardExpMonth: string;
+  cardExpYear: string;
+  cardCvv: string;
+  bankOneTimeToken: string;
 }
 
 // USD to IDR conversion rate (configurable)
@@ -84,9 +95,16 @@ const baseCreatePaymentSchema = z.object({
     .min(1, "Pesan donasi wajib diisi")
     .max(250, "Pesan donasi maksimal 250 karakter"),
   notes: z.string().optional().or(z.literal("")),
-  paymentMethod: z.enum(["bank_transfer", "gopay", "qris", "crypto"]),
+  paymentMethod: z.enum(["bank_transfer", "gopay", "qris", "crypto", "credit_card"]),
   bank: z.string().optional(),
   currency: z.string().optional(),
+  cardTokenId: z.string().optional(),
+  saveCard: z.boolean().optional(),
+  cardNumber: z.string().optional(),
+  cardExpMonth: z.string().optional(),
+  cardExpYear: z.string().optional(),
+  cardCvv: z.string().optional(),
+  bankOneTimeToken: z.string().optional(),
 });
 
 // Create final schema with refinements
@@ -108,6 +126,35 @@ const createPaymentSchema = baseCreatePaymentSchema.refine((data) => {
 }, {
   message: "Bank wajib dipilih untuk metode pembayaran Bank Transfer",
   path: ["bank"],
+}).refine((data) => {
+  if (data.paymentMethod === "credit_card") {
+    const num = (data.cardNumber || "").replace(/\s/g, "");
+    return num.length >= 15 && num.length <= 19 && /^\d+$/.test(num);
+  }
+  return true;
+}, {
+  message: "Nomor kartu wajib 15–19 digit",
+  path: ["cardNumber"],
+}).refine((data) => {
+  if (data.paymentMethod === "credit_card") {
+    const m = data.cardExpMonth || "";
+    const y = data.cardExpYear || "";
+    return m.length >= 1 && m.length <= 2 && parseInt(m, 10) >= 1 && parseInt(m, 10) <= 12 &&
+           y.length >= 2 && y.length <= 4 && /^\d+$/.test(y);
+  }
+  return true;
+}, {
+  message: "Bulan (01–12) dan tahun kadaluarsa wajib diisi",
+  path: ["cardExpMonth"],
+}).refine((data) => {
+  if (data.paymentMethod === "credit_card") {
+    const cvv = (data.cardCvv || "").trim();
+    return cvv.length >= 3 && cvv.length <= 4 && /^\d+$/.test(cvv);
+  }
+  return true;
+}, {
+  message: "CVV wajib 3 atau 4 digit",
+  path: ["cardCvv"],
 }).refine((data) => {
   // For non-crypto payment methods, amount must be >= 1000 (IDR minimum)
   if (data.paymentMethod !== "crypto") {
@@ -159,7 +206,9 @@ const getPaymentMethodLogo = (method: string, cryptoCurrency?: string, bankType?
     // Use Plisio icon URL format: https://plisio.net/img/psys-icon/{CID}.svg
     return `https://plisio.net/img/psys-icon/${cryptoCurrency.toUpperCase()}.svg`;
   }
-  
+  if (method === "credit_card") {
+    return `${baseUrl}/card/credit_card.png`;
+  }
   return null;
 };
 
@@ -179,7 +228,7 @@ export default function DonatePage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [testHitLoading, setTestHitLoading] = useState(false);
   const [testHitMessage, setTestHitMessage] = useState<string | null>(null);
-  const [formData, setFormData] = useState<CreatePaymentRequest>({
+  const [formData, setFormData] = useState<CreatePaymentRequest & { cardNumber?: string; cardExpMonth?: string; cardExpYear?: string; cardCvv?: string; bankOneTimeToken?: string }>({
     donorName: "",
     donorEmail: "",
     amount: 0,
@@ -189,9 +238,48 @@ export default function DonatePage() {
     paymentMethod: "qris",
     bank: "bca",
     currency: "",
+    cardTokenId: "",
+    saveCard: false,
+    cardNumber: "",
+    cardExpMonth: "",
+    cardExpYear: "",
+    cardCvv: "",
+    bankOneTimeToken: "",
   });
+  const [midtransScriptLoaded, setMidtransScriptLoaded] = useState(false);
+  const [show3DSModal, setShow3DSModal] = useState(false);
+  const [url3DS, setUrl3DS] = useState("");
+  const [paymentSuccessAfter3DS, setPaymentSuccessAfter3DS] = useState<string | null>(null);
+  const threeDSModalRef = React.useRef<{ close: () => void } | null>(null);
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+  const midtransClientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || "SB-Mid-client-AyXigF7mydBiMeLq";
+  const midtransEnv = process.env.NEXT_PUBLIC_MIDTRANS_ENV || "sandbox";
+
+  // Load Midtrans New 3DS JS (untuk getCardToken & authenticate)
+  // Library mencari script dengan id="midtrans-script" untuk getAttribute('data-client-key')
+  useEffect(() => {
+    if (formData.paymentMethod !== "credit_card" || !midtransClientKey) return;
+    const scriptId = "midtrans-script";
+    if (document.getElementById(scriptId)) {
+      setMidtransScriptLoaded(!!window.MidtransNew3ds);
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.type = "text/javascript";
+    script.src = "https://api.midtrans.com/v2/assets/js/midtrans-new-3ds.min.js";
+    script.setAttribute("data-environment", midtransEnv);
+    script.setAttribute("data-client-key", midtransClientKey);
+    script.async = true;
+    script.onload = () => setMidtransScriptLoaded(!!window.MidtransNew3ds);
+    document.body.appendChild(script);
+    return () => {
+      const el = document.getElementById(scriptId);
+      if (el) el.remove();
+      setMidtransScriptLoaded(false);
+    };
+  }, [formData.paymentMethod, midtransClientKey, midtransEnv]);
 
   // Tes hit: trigger dummy media share (1k, YouTube) untuk cek overlay /donate/gif
   const handleTestHit = async () => {
@@ -377,18 +465,155 @@ export default function DonatePage() {
     }
   };
 
+  const close3DSModal = () => {
+    setShow3DSModal(false);
+    setUrl3DS("");
+    threeDSModalRef.current = null;
+  };
+
   const handleConfirmPayment = async () => {
     setShowConfirmDialog(false);
     setLoading(true);
 
     try {
-      // Convert startTime from minutes to seconds before sending
-      const submitData = {
+      if (formData.paymentMethod === "credit_card") {
+        if (!midtransClientKey) {
+          toast({ title: "Konfigurasi", description: "NEXT_PUBLIC_MIDTRANS_CLIENT_KEY belum di-set.", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+        if (!window.MidtransNew3ds) {
+          toast({ title: "Midtrans", description: "Script Midtrans belum siap. Tunggu sebentar lalu coba lagi.", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+        const cardNumber = (formData.cardNumber || "").replace(/\s/g, "");
+        const expMonth = parseInt(formData.cardExpMonth || "0", 10) || 1;
+        const expYear = parseInt(formData.cardExpYear || "0", 10) || new Date().getFullYear();
+        const cardData = {
+          card_number: cardNumber,
+          card_exp_month: expMonth,
+          card_exp_year: expYear,
+          card_cvv: formData.cardCvv || "",
+          ...(formData.bankOneTimeToken ? { bank_one_time_token: formData.bankOneTimeToken } : {}),
+        };
+        window.MidtransNew3ds.getCardToken(cardData, {
+          onSuccess: async (response) => {
+            try {
+              const tokenId = response.token_id;
+              const submitData = {
+                donorName: formData.donorName,
+                donorEmail: formData.donorEmail,
+                amount: formData.amount,
+                donationType: formData.donationType,
+                message: formData.message,
+                notes: formData.notes,
+                paymentMethod: "credit_card" as const,
+                startTime: startTimeMinutes > 0 ? startTimeMinutes * 60 : undefined,
+                mediaUrl: formData.mediaUrl,
+                mediaType: formData.mediaType,
+                cardTokenId: tokenId,
+                saveCard: formData.saveCard ?? false,
+              };
+              const endpoint = `${apiBaseUrl}/payment/create`;
+              const responseApi = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(submitData),
+              });
+              const data = await responseApi.json();
+              if (!data.success || !data.data) {
+                toast({ title: "Gagal Membuat Pembayaran", description: data.error || "Unknown error", variant: "destructive" });
+                setLoading(false);
+                return;
+              }
+              const redirectUrl = data.data.redirectUrl;
+              const paymentId = data.data.payment?.id || data.data.id || data.data.orderId;
+              if (redirectUrl && window.MidtransNew3ds) {
+                window.MidtransNew3ds.authenticate(redirectUrl, {
+                  performAuthentication: (url: string) => {
+                    setUrl3DS(url);
+                    setShow3DSModal(true);
+                  },
+                  onSuccess: async (response) => {
+                    close3DSModal();
+                    setLoading(false);
+                    const status = response?.transaction_status as string | undefined;
+                    const orderId = (response?.order_id as string) || undefined;
+                    try {
+                      if (orderId && (status === "capture" || status === "settlement")) {
+                        await fetch(`${apiBaseUrl}/payment/confirm-3ds`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(response),
+                        });
+                      }
+                    } catch (e) {
+                      console.warn("[3DS] confirm-3ds request failed:", e);
+                    }
+                    if (paymentId) setPaymentSuccessAfter3DS(paymentId);
+                    else toast({ title: "Pembayaran Berhasil", description: "Transaksi berhasil." });
+                  },
+                  onFailure: () => {
+                    close3DSModal();
+                    setLoading(false);
+                    toast({ title: "Verifikasi 3DS Gagal", description: "Pembayaran ditolak atau dibatalkan.", variant: "destructive" });
+                    if (paymentId) router.push(`/${paymentId}`);
+                  },
+                  onPending: async (response: unknown) => {
+                    close3DSModal();
+                    setLoading(false);
+                    const res = response as Record<string, unknown> | undefined;
+                    const status = res?.transaction_status as string | undefined;
+                    const orderId = res?.order_id as string | undefined;
+                    if (orderId && (status === "capture" || status === "settlement")) {
+                      try {
+                        await fetch(`${apiBaseUrl}/payment/confirm-3ds`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(response),
+                        });
+                      } catch (e) {
+                        console.warn("[3DS] confirm-3ds (onPending) failed:", e);
+                      }
+                      if (paymentId) setPaymentSuccessAfter3DS(paymentId);
+                      return;
+                    }
+                    if (paymentId) router.push(`/${paymentId}`);
+                    toast({ title: "Menunggu", description: "Menunggu konfirmasi pembayaran." });
+                  },
+                });
+              } else {
+                setLoading(false);
+                if (paymentId) router.push(`/${paymentId}`);
+                else toast({ title: "Pembayaran Dibuat", description: "Lihat halaman payment untuk status." });
+              }
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              const stack = err instanceof Error ? err.stack : undefined;
+              console.error("[Payment Credit Card onSuccess]", err);
+              console.error("[Payment Credit Card onSuccess] message:", msg);
+              if (stack) console.error("[Payment Credit Card onSuccess] stack:", stack);
+              setLoading(false);
+              toast({ title: "Gagal Membuat Pembayaran", description: msg, variant: "destructive" });
+            }
+          },
+          onFailure: (response) => {
+            setLoading(false);
+            console.error("Midtrans getCardToken failure:", response);
+            const msg = (response as { status_message?: string })?.status_message || "Gagal mendapatkan token kartu. Periksa data kartu.";
+            toast({ title: "Token Kartu Gagal", description: msg, variant: "destructive" });
+          },
+        });
+        return;
+      }
+
+      // Non–credit_card flow
+      const submitData: Record<string, unknown> = {
         ...formData,
         startTime: startTimeMinutes > 0 ? startTimeMinutes * 60 : undefined,
       };
 
-      // Determine which endpoint to use
       const endpoint =
         formData.paymentMethod === "crypto"
           ? `${apiBaseUrl}/payment/plisio/create`
@@ -396,51 +621,36 @@ export default function DonatePage() {
 
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submitData),
       });
 
       const data = await response.json();
 
       if (data.success && data.data) {
-        // For crypto payments, redirect to invoice_url if available
         if (formData.paymentMethod === "crypto") {
           const invoiceUrl = data.data.invoiceUrl || data.data.invoice?.invoiceUrl;
           if (invoiceUrl) {
-            // Redirect directly to Plisio invoice page
             window.location.href = invoiceUrl;
             return;
           }
         }
 
-        // For other payment methods, redirect to payment detail page
-        const paymentId =
-          data.data.payment?.id ||
-          data.data.id ||
-          data.data.orderId;
-        if (paymentId) {
-          router.push(`/${paymentId}`);
-        } else {
-          toast({
-            title: "Error",
-            description: "Payment created but unable to redirect",
-            variant: "destructive",
-          });
-        }
+        const paymentId = data.data.payment?.id || data.data.id || data.data.orderId;
+        if (paymentId) router.push(`/${paymentId}`);
+        else toast({ title: "Error", description: "Payment created but unable to redirect", variant: "destructive" });
       } else {
-        toast({
-          title: "Gagal Membuat Pembayaran",
-          description: data.error || "Unknown error",
-          variant: "destructive",
-        });
+        toast({ title: "Gagal Membuat Pembayaran", description: data.error || "Unknown error", variant: "destructive" });
       }
-    } catch (error) {
-      console.error("Error creating payment:", error);
+    } catch (error: unknown) {
+      const errMessage = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
+      console.error("[Payment Error]", error);
+      console.error("[Payment Error] message:", errMessage);
+      if (errStack) console.error("[Payment Error] stack:", errStack);
       toast({
         title: "Gagal Membuat Pembayaran",
-        description: "Terjadi kesalahan saat membuat pembayaran. Silakan coba lagi.",
+        description: errMessage || "Terjadi kesalahan saat membuat pembayaran. Silakan coba lagi.",
         variant: "destructive",
       });
     } finally {
@@ -955,8 +1165,155 @@ export default function DonatePage() {
                     )}
                     <span className="text-xs text-gray-500">0%</span>
                   </button>
+
+                  {/* Credit Card Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, paymentMethod: "credit_card" }));
+                      scrollToBottom();
+                    }}
+                    className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center cursor-pointer ${
+                      formData.paymentMethod === "credit_card"
+                        ? "border-blue-600 bg-blue-50"
+                        : "border-gray-200 bg-white hover:border-gray-300"
+                    }`}
+                  >
+                    {getPaymentMethodLogo("credit_card") ? (
+                      <img
+                        src={getPaymentMethodLogo("credit_card")!}
+                        alt="Credit Card"
+                        className="w-16 h-16 object-contain mb-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center mb-2">
+                        <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                        </svg>
+                      </div>
+                    )}
+                    <span className="text-xs text-gray-500">Kartu Kredit</span>
+                  </button>
                 </div>
               </div>
+
+              {/* Credit Card: input kartu (Midtrans Get Card Token) */}
+              {formData.paymentMethod === "credit_card" && (
+                <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                  {!midtransClientKey && (
+                    <p className="text-sm text-amber-600">
+                      Set NEXT_PUBLIC_MIDTRANS_CLIENT_KEY di env untuk pembayaran kartu.
+                    </p>
+                  )}
+                  <div className="grid gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="cardNumber">Nomor Kartu <span className="text-red-500">*</span></Label>
+                      <Input
+                        id="cardNumber"
+                        name="cardNumber"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="cc-number"
+                        maxLength={19}
+                        value={formData.cardNumber || ""}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, "").slice(0, 19);
+                          setFormData((prev) => ({ ...prev, cardNumber: v }));
+                          if (formErrors.cardNumber) setFormErrors((p) => ({ ...p, cardNumber: "" }));
+                        }}
+                        placeholder="4811 1111 1111 1114"
+                        className={formErrors.cardNumber ? "border-red-500" : ""}
+                      />
+                      {formErrors.cardNumber && <p className="text-sm text-red-500">{formErrors.cardNumber}</p>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="cardExpMonth">Bulan Kadaluarsa (MM) <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="cardExpMonth"
+                          name="cardExpMonth"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
+                          placeholder="02"
+                          value={formData.cardExpMonth || ""}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, "").slice(0, 2);
+                            setFormData((prev) => ({ ...prev, cardExpMonth: v }));
+                            if (formErrors.cardExpMonth) setFormErrors((p) => ({ ...p, cardExpMonth: "" }));
+                          }}
+                          className={formErrors.cardExpMonth ? "border-red-500" : ""}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cardExpYear">Tahun (YYYY) <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="cardExpYear"
+                          name="cardExpYear"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          placeholder="2025"
+                          value={formData.cardExpYear || ""}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+                            setFormData((prev) => ({ ...prev, cardExpYear: v }));
+                            if (formErrors.cardExpYear) setFormErrors((p) => ({ ...p, cardExpYear: "" }));
+                          }}
+                          className={formErrors.cardExpYear ? "border-red-500" : ""}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cardCvv">CVV <span className="text-red-500">*</span></Label>
+                      <Input
+                        id="cardCvv"
+                        name="cardCvv"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="cc-csc"
+                        maxLength={4}
+                        value={formData.cardCvv || ""}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+                          setFormData((prev) => ({ ...prev, cardCvv: v }));
+                          if (formErrors.cardCvv) setFormErrors((p) => ({ ...p, cardCvv: "" }));
+                        }}
+                        placeholder="123"
+                        className={formErrors.cardCvv ? "border-red-500" : ""}
+                      />
+                      {formErrors.cardCvv && <p className="text-sm text-red-500">{formErrors.cardCvv}</p>}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="bankOneTimeToken">Bank One Time Token (opsional, untuk 3DS)</Label>
+                      <Input
+                        id="bankOneTimeToken"
+                        name="bankOneTimeToken"
+                        type="text"
+                        value={formData.bankOneTimeToken || ""}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, bankOneTimeToken: e.target.value }))}
+                        placeholder="12345678 (sandbox)"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Sandbox: 4811 1111 1111 1114, CVV 123, Exp 02/2025, OTP 3DS: 112233, Bank token: 12345678
+                  </p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.saveCard || false}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, saveCard: e.target.checked }))}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700">Simpan kartu (One Click)</span>
+                  </label>
+                </div>
+              )}
 
               {/* Bank Selection (for bank_transfer) */}
               {formData.paymentMethod === "bank_transfer" && (
@@ -1110,6 +1467,16 @@ export default function DonatePage() {
               </span>
             </div>
 
+            {/* Credit Card (if credit_card) */}
+            {formData.paymentMethod === "credit_card" && (
+              <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                <span className="text-sm text-gray-600">Kartu Kredit</span>
+                <span className="text-sm font-semibold text-gray-900 font-mono">
+                  **** {formData.cardNumber ? formData.cardNumber.slice(-4) : "****"}
+                </span>
+              </div>
+            )}
+
             {/* Bank Selection (if bank_transfer) */}
             {formData.paymentMethod === "bank_transfer" && formData.bank && (
               <div className="flex justify-between items-center pb-3 border-b border-gray-200">
@@ -1204,6 +1571,79 @@ export default function DonatePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Layar sukses langsung setelah OTP 3DS berhasil (tanpa redirect ke halaman 3DS lagi) */}
+      {paymentSuccessAfter3DS && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
+            <div className="mx-auto w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mb-6">
+              <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Pembayaran Berhasil!</h2>
+            <p className="text-gray-600 mb-6">Verifikasi 3D Secure selesai. Terima kasih telah berdonasi.</p>
+            <Button
+              onClick={() => {
+                router.push(`/${paymentSuccessAfter3DS}`);
+                setPaymentSuccessAfter3DS(null);
+              }}
+              className="w-full bg-black hover:bg-gray-800 text-white py-6"
+            >
+              Lihat Detail Pembayaran
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 3DS Authentication - UI pas dengan halaman OTP Issuing Bank */}
+      {show3DSModal && url3DS && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-[480px] sm:max-w-[520px] overflow-hidden border border-gray-200" style={{ height: "90vh", maxHeight: "640px" }}>
+            {/* Header: Verifikasi 3D Secure — Issuing Bank */}
+            <div className="flex items-center justify-between px-5 py-3.5 bg-white border-b border-gray-200 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gray-100 text-gray-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Verifikasi 3D Secure</h2>
+                  <p className="text-xs text-gray-500">Issuing Bank</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={close3DSModal}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+                aria-label="Tutup"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Sandbox: masukkan 112233 di kolom Password */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-100 shrink-0">
+              <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-sm text-amber-800">
+                Sandbox: masukkan <strong className="font-mono bg-amber-100/80 px-1 rounded">112233</strong> di kolom Password pada halaman bank di bawah.
+              </p>
+            </div>
+            {/* Iframe: halaman Issuing Bank (OTP/Password) */}
+            <div className="flex-1 min-h-0 relative bg-gray-50">
+              <iframe
+                title="Issuing Bank - 3D Secure"
+                src={url3DS}
+                className="absolute inset-0 w-full h-full border-0 bg-white rounded-b-2xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Crypto Currency Selection Dialog */}
       <AlertDialog open={showCryptoDialog} onOpenChange={setShowCryptoDialog}>
