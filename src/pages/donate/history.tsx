@@ -469,11 +469,11 @@ export default function HistoryPage() {
                 <SelectValue placeholder="Filter waktu" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Semua Waktu</SelectItem>
-                <SelectItem value="1min">1 Menit yang Lalu</SelectItem>
-                <SelectItem value="1hour">1 Jam yang Lalu</SelectItem>
-                <SelectItem value="1day">1 Hari yang Lalu</SelectItem>
-                <SelectItem value="1week">1 Minggu yang Lalu</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="1min">1 Minute Ago</SelectItem>
+                <SelectItem value="1hour">1 Hour Ago</SelectItem>
+                <SelectItem value="1day">1 Day Ago</SelectItem>
+                <SelectItem value="1week">1 Week Ago</SelectItem>
               </SelectContent>
             </Select>
             
